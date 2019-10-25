@@ -160,15 +160,29 @@ RecvAck ==
 \* Leaves every variable unchanged except msgQ and ackQ
 Lose(q) ==
     /\ q # << >>            \* Enabled iff q is not empty
-    /\ \E i \in 1..Len(q) : \* For some i, remote the ith message from q.
+    /\ \E i \in 1..Len(q) : \* For some i, remove the ith message from q.
         q' = [j \in 1..(Len(q) - 1) |-> IF j < i THEN q[j] ELSE q[j + 1]]
     /\ UNCHANGED <<sSn, sWin, rWin>>
 
-\* Lose a message from msgQ.
-LoseMsg == Lose(msgQ) /\ UNCHANGED ackQ
+\* The action of duplicating a message from queue q.
+Dup(q) ==
+    /\ q # << >>            \* Enabled iff q is not empty
+    /\ \E i \in 1..Len(q) : \* For some i, append it to the q.
+        q' = Append(q, q[i])
+    /\ UNCHANGED <<sSn, sWin, rWin>>
 
-\* Loose a message from ackQ.
-LoseAck == Lose(ackQ) /\ UNCHANGED msgQ
+\* The action of reordering a message in queue q.
+Mix(q) ==
+    /\ q # << >>            \* Enabled iff q is not empty
+    /\ \E i, j \in 1..Len(q) : \* For some i, j swap.
+        q' = [q EXCEPT ![i] = q[j], ![j] = q[i]]
+    /\ UNCHANGED <<sSn, sWin, rWin>>
+
+\* Message queue failure.
+MsgQFail == (Lose(msgQ) \/ Dup(msgQ) \/ Mix(msgQ)) /\ UNCHANGED ackQ
+
+\* Ack queue failure.
+AckQFail == (Lose(ackQ) \/ Dup(ackQ) \/ Mix(ackQ)) /\ UNCHANGED msgQ
 
 \* The next state action.
 Next ==
@@ -178,8 +192,8 @@ Next ==
     \/ RecvMsg
     \/ SendAck
     \/ RecvAck
-    \/ LoseMsg
-    \/ LoseAck
+    \/ MsgQFail
+    \/ AckQFail
 
 ----
 
