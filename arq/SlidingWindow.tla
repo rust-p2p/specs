@@ -1,4 +1,4 @@
----- MODULE GoBackN ----
+---- MODULE SlidingWindow ----
 \* This specification describes a protocol for using lossy, duplicating and
 \* reordering  transmission lines to transmit a sequence of values from a
 \* sender to a receiver. The sender sends a data value d by sending a sequence
@@ -191,8 +191,7 @@ AckQFail == Fail(ackQ) /\ UNCHANGED <<sendQ, recvQ, msgQ, sSn, sWin, rWin>>
 
 \* The next state action.
 Next ==
-    \/ /\ sSn < 4 \* TODO remove this purely mc constraint
-       /\ \E d \in Data : SendMsg(d)
+    \/ \E d \in Data : SendMsg(d)
     \/ ReSendAnyMsg
     \/ RecvMsg
     \/ SendAck
