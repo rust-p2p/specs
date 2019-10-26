@@ -7,17 +7,23 @@
 \*
 \* In this model we assume that sequence numbers are unbounded and the window
 \* size is constant.
-EXTENDS Naturals, Sequences, UnreliableChannel
+EXTENDS
+    Naturals,
+    Sequences,
+    UnreliableChannel
 
 CONSTANTS
     Data, \* The set of data values that can be sent
     N     \* window size
 
 VARIABLES
-    \* The sequence of <control bit, data value> messages in transit to the
-    \* receiver.
+    \* The sequence of packets sent by the sender.
+    sendQ,
+    \* The sequence of packets received by the receiver.
+    recvQ,
+    \* The sequence of packets in transit to the receiver.
     msgQ,
-    \* The sequence of one-bit acknowledgments in transit to the sender.
+    \* The sequence of acks in transit to the sender.
     ackQ,
     \* The last sequence number sent.
     sSn,
@@ -32,6 +38,8 @@ ASSUME N \in Nat /\ N > 0
 Sn == Nat
 Packet == [sn: Sn, d: Data]
 Win == [base: Sn, max: Sn, q: Seq(Packet)]
+
+RCSpec == INSTANCE ReliableChannelSpec WITH Data <- Packet
 
 \* Contains takes a sequence and a predicate and evaluates to true if any
 \* element of the sequence satisfies the predicate.
@@ -63,9 +71,16 @@ WinMove[w \in Win, b \in Sn] == [base |-> b, max |-> b + N, q |-> w.q]
 
 \* Moves the window until all ordered messages are removed.
 WinMoveOrdered[w \in Win] ==
-    IF w.q # <<>> /\ w.base = Head(w.q).sn
-    THEN WinMoveOrdered[[WinMove[w, w.base + 1] EXCEPT !.q = Tail(w.q)]]
-    ELSE w
+    IF w.q # << >> /\ w.base = Head(w.q).sn
+    THEN
+       LET w1 == WinMove[w, w.base + 1]
+           w2 == [w1 EXCEPT !.q = Tail(w.q)]
+           res == WinMoveOrdered[w2]
+           w3 == res[1]
+           r1 == res[2]
+           r2 == <<Head(w.q)>> \o r1
+       IN <<w3, r2>>
+    ELSE <<w, << >>>>
 
 \* Moves the window and removes acked messages.
 WinMoveBase[w \in Win, b \in Sn] ==
@@ -90,6 +105,7 @@ WinInsert[w \in Win, p \in Packet] ==
 \*   All the sequence numbers equal 0.
 \*   The initial value for recv is an arbitrary data values.
 Init ==
+    /\ RCSpec!Init
     /\ msgQ = <<>>
     /\ ackQ = <<>>
     /\ sSn = 0
@@ -107,6 +123,7 @@ WindowInv(w) ==
 
 \* The type correctness invariant.
 TypeInv ==
+    /\ RCSpec!TypeInv
     /\ msgQ \in Seq(Packet)
     /\ ackQ \in Seq(Sn)
     /\ sSn \in Sn
@@ -125,13 +142,14 @@ SendMsg(d) ==
        IN
         /\ sWin' = [sWin EXCEPT !.q = Append(sWin.q, p)]\* Add packet to the window.
         /\ msgQ' = Append(msgQ, p)                      \* Send value on msgQ with sequence number.
-    /\ UNCHANGED <<ackQ, rWin>>
+        /\ RCSpec!Send(p)
+    /\ UNCHANGED <<recvQ, ackQ, rWin>>
 
 \* The sender resends a message from the window on msgQ.
 ReSendMsg(i) ==
     /\ i <= Len(sWin.q)                                 \* Enabled iff the index is in range.
     /\ msgQ' = Append(msgQ, sWin.q[i])                  \* Resend the ith message from the window.
-    /\ UNCHANGED <<ackQ, sSn, sWin, rWin>>
+    /\ UNCHANGED <<sendQ, recvQ, ackQ, sSn, sWin, rWin>>
 
 \* The sender resends any message from the window on msgQ.
 ReSendAnyMsg == \E i \in 1..Len(sWin.q) : ReSendMsg(i)
@@ -140,15 +158,20 @@ ReSendAnyMsg == \E i \in 1..Len(sWin.q) : ReSendMsg(i)
 RecvMsg ==
     /\ msgQ # << >>                          \* Enabled iff msgQ not empty.
     /\ msgQ' = Tail(msgQ)                    \* Remove message from head of msgQ.
-    /\ rWin' = WinMoveOrdered[WinInsert[rWin, Head(msgQ)]]
-        \* Inserts the packet into the window if it is not a duplicate and filters
-        \*  any complete sequences of packets from the window.
-    /\ UNCHANGED <<ackQ, sSn, sWin>>
+    /\ \* Inserts the packet into the window if it is not a duplicate and filters
+       \* any complete sequences of packets from the window.
+       LET w1 == WinInsert[rWin, Head(msgQ)]
+           res == WinMoveOrdered[w1]
+       IN /\ rWin' = res[1]
+          /\ recvQ' = recvQ \o res[2]
+          \* Instead of using Recv from ReliableChannelSpec
+          \* so that we can add batches of packets.
+    /\ UNCHANGED <<sendQ, ackQ, sSn, sWin>>
 
 \* The receiver sends receiver window base on ackQ at any time.
 SendAck ==
     /\ ackQ' = Append(ackQ, rWin.base)
-    /\ UNCHANGED <<msgQ, sSn, sWin, rWin>>
+    /\ UNCHANGED <<sendQ, recvQ, msgQ, sSn, sWin, rWin>>
 
 \* The sender receives an ack on ackQ
 RecvAck ==
@@ -158,13 +181,13 @@ RecvAck ==
         IF Head(ackQ) > sWin.base      \* to new base (and drop all acked messages).
         THEN WinMoveBase[sWin, Head(ackQ)]
         ELSE sWin
-    /\ UNCHANGED <<msgQ, sSn, rWin>>
+    /\ UNCHANGED <<sendQ, recvQ, msgQ, sSn, rWin>>
 
 \* Message queue failure.
-MsgQFail == Fail(msgQ) /\ UNCHANGED <<ackQ, sSn, sWin, rWin>>
+MsgQFail == Fail(msgQ) /\ UNCHANGED <<sendQ, recvQ, ackQ, sSn, sWin, rWin>>
 
 \* Ack queue failure.
-AckQFail == Fail(ackQ) /\ UNCHANGED <<msgQ, sSn, sWin, rWin>>
+AckQFail == Fail(ackQ) /\ UNCHANGED <<sendQ, recvQ, msgQ, sSn, sWin, rWin>>
 
 \* The next state action.
 Next ==
@@ -180,7 +203,7 @@ Next ==
 ----
 
 \* The tuple of all variables.
-vars == <<msgQ, ackQ, sSn, sWin, rWin>>
+vars == <<sendQ, recvQ, msgQ, ackQ, sSn, sWin, rWin>>
 
 \* The liveness condition
 Fairness ==
@@ -188,6 +211,7 @@ Fairness ==
     /\ WF_vars(SendAck)
     /\ SF_vars(RecvMsg)
     /\ SF_vars(RecvAck)
+    /\ RCSpec!Liveness
 
 \* The complete specification
 Spec == Init /\ [][Next]_vars /\ Fairness
