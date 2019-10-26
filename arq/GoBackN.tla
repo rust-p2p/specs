@@ -7,7 +7,7 @@
 \*
 \* In this model we assume that sequence numbers are unbounded and the window
 \* size is constant.
-EXTENDS Naturals, Sequences
+EXTENDS Naturals, Sequences, UnreliableChannel
 
 CONSTANTS
     Data, \* The set of data values that can be sent
@@ -96,20 +96,24 @@ Init ==
     /\ sWin = [base |-> 0, max |-> N, q |-> <<>>]
     /\ rWin = sWin
 
+\* Invariant describing the relationship of the fields in a window.
+WindowInv(w) ==
+    /\ w.max >= w.base
+    /\ w.max - w.base = N
+    /\ Len(w.q) <= w.max - w.base
+    /\ \A i \in 1..Len(w.q) :
+        /\ w.q[i].sn >= w.base
+        /\ w.q[i].sn <= w.max
+
 \* The type correctness invariant.
 TypeInv ==
     /\ msgQ \in Seq(Packet)
     /\ ackQ \in Seq(Sn)
     /\ sSn \in Sn
     /\ sWin \in Win
+    /\ WindowInv(sWin)
     /\ rWin \in Win
-
-\* Invariant describing the relationship of the fields in a window.
-WindowInv ==
-    /\ sWin.max >= sWin.base
-    /\ rWin.max >= rWin.base
-    /\ Len(sWin.q) <= sWin.max - sWin.base
-    /\ Len(rWin.q) <= rWin.max - rWin.base
+    /\ WindowInv(rWin)
 
 ----
 
@@ -156,33 +160,11 @@ RecvAck ==
         ELSE sWin
     /\ UNCHANGED <<msgQ, sSn, rWin>>
 
-\* The action of loosing a message from queue q.
-\* Leaves every variable unchanged except msgQ and ackQ
-Lose(q) ==
-    /\ q # << >>            \* Enabled iff q is not empty
-    /\ \E i \in 1..Len(q) : \* For some i, remove the ith message from q.
-        q' = [j \in 1..(Len(q) - 1) |-> IF j < i THEN q[j] ELSE q[j + 1]]
-    /\ UNCHANGED <<sSn, sWin, rWin>>
-
-\* The action of duplicating a message from queue q.
-Dup(q) ==
-    /\ q # << >>            \* Enabled iff q is not empty
-    /\ \E i \in 1..Len(q) : \* For some i, append it to the q.
-        q' = Append(q, q[i])
-    /\ UNCHANGED <<sSn, sWin, rWin>>
-
-\* The action of reordering a message in queue q.
-Mix(q) ==
-    /\ q # << >>            \* Enabled iff q is not empty
-    /\ \E i, j \in 1..Len(q) : \* For some i, j swap.
-        q' = [q EXCEPT ![i] = q[j], ![j] = q[i]]
-    /\ UNCHANGED <<sSn, sWin, rWin>>
-
 \* Message queue failure.
-MsgQFail == (Lose(msgQ) \/ Dup(msgQ) \/ Mix(msgQ)) /\ UNCHANGED ackQ
+MsgQFail == Fail(msgQ) /\ UNCHANGED <<ackQ, sSn, sWin, rWin>>
 
 \* Ack queue failure.
-AckQFail == (Lose(ackQ) \/ Dup(ackQ) \/ Mix(ackQ)) /\ UNCHANGED msgQ
+AckQFail == Fail(ackQ) /\ UNCHANGED <<msgQ, sSn, sWin, rWin>>
 
 \* The next state action.
 Next ==
