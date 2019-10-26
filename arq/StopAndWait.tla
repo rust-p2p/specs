@@ -8,7 +8,7 @@
 \* msgQ contains a new value when the control bit differs from the last one it
 \* received. The receiver keeps sending the last control bit it received on
 \* ackQ.
-EXTENDS Naturals, Sequences
+EXTENDS Naturals, Sequences, UnreliableChannel
 CONSTANT Data \* The set of data values that can be sent
 
 VARIABLES
@@ -90,19 +90,11 @@ RecvAck ==
     /\ sAck' = Head(ackQ)
     /\ UNCHANGED <<msgQ, sBit, rBit, sent, recv>>
 
-\* The action of loosing a message from queue q.
-\* Leaves every variable unchanged except msgQ and ackQ
-Lose(q) ==
-    /\ q # << >>            \* Enabled iff q is not empty
-    /\ \E i \in 1..Len(q) : \* For some i, remote the ith message from q.
-        q' = [j \in 1..(Len(q) - 1) |-> IF j < i THEN q[j] ELSE q[j + 1]]
-    /\ UNCHANGED <<sBit, sAck, rBit, sent, recv>>
-
 \* Lose a message from msgQ.
-LoseMsg == Lose(msgQ) /\ UNCHANGED ackQ
+LoseMsg == Lose(msgQ) /\ UNCHANGED <<ackQ, sBit, sAck, rBit, sent, recv>>
 
 \* Loose a message from ackQ.
-LoseAck == Lose(ackQ) /\ UNCHANGED msgQ
+LoseAck == Lose(ackQ) /\ UNCHANGED <<msgQ, sBit, sAck, rBit, sent, recv>>
 
 \* The next state action.
 Next ==
