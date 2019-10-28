@@ -1,4 +1,27 @@
 ---- MODULE Handshake ----
+\* When establishing a connection the initiator must know the addr, port and
+\* peer_id of the responder, where the peer_id is a hash of the peer's public
+\* key: peer_id = hash(s).
+\*
+\* ## Message format
+\* (drf: bool, seq_num: u64, handshake: [u8], payload: [u8])
+\*
+\* ## Protocol
+\* XXsig:
+\*   -> (true, n, e, []) where n: random(u16)
+\*   <- (false, n+1, e ee s sig, addr) where addr is the observed external address
+\*   -> (false, n+2, s sig)
+\*
+\* Two peers may attempt to initiate a handshake concurrently. When this happens,
+\* the handshake with the largest sequence number wins. If there is a tie the
+\* initiator with the larger peer_id wins. If the peer becomes a responder, after
+\* receiving the n+2 message it must hash the public key s and verify that it
+\* matches the peer_id it attempted to connect to.
+\*
+\* After receiving message n+1 the public key s is hashed by the initiator to
+\* verify that it matches the peer_id.
+\*
+\* Handshake messages are padded to *TODO* length.
 
 EXTENDS Naturals, Sequences, UnreliableChannel
 
@@ -50,7 +73,7 @@ SendStage1(state, sCh) ==
         IN Append(sCh, p)
     /\ UNCHANGED state
 
-\* Recv the rist message of the handshake.
+\* Recv the first message of the handshake.
 RecvStage1(state, rCh, tie) ==
     /\ rCh # << >>
     /\ state.s < 2                                        \* Enabled iff state = 0 (responder)
