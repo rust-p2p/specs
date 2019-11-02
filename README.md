@@ -8,6 +8,13 @@ configuration can be found in `MC$.cfg`. To execute the model checker run
 `tlc MC$.tla`. The `tla-tools` can be installed on arch linux using
 `yay -S tla-tools`.
 
+## Search path
+To add a directory to the search path set the `TLA_JAVA_OPTS` variable.
+
+```sh
+cd examples
+TLA_JAVA_OPTS="-DTLA-Library=../utils" tlc Ping.tla
+```
 
 ## License
 ISC License
