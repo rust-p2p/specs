@@ -1,19 +1,19 @@
 ---- MODULE Socket ----
 EXTENDS Bags, Naturals
 
-CONSTANT Node, MaxMsgsTransit
+CONSTANTS Node, MaxMsgsTransit, Payload
 VARIABLE msgs
 
-Packet(T) == [src: Node, dst: Node, payload: T]
+Packet == [src: Node, dst: Node, payload: Payload]
 
-SocketInit ==
+Init ==
     /\ msgs = EmptyBag
 
-SocketTypeInv(T) ==
+TypeInv ==
     /\ IsABag(msgs)
-    /\ \A msg \in BagToSet(msgs) : msg \in Packet(T)
+    /\ \A msg \in BagToSet(msgs) : msg \in Packet
 
-SocketConstraint == BagCardinality(msgs) <= MaxMsgsTransit
+Constraint == BagCardinality(msgs) <= MaxMsgsTransit
 
 Send(ms, m) == ms \oplus SetToBag({m})
 
@@ -37,12 +37,12 @@ PeekRecv(n, from) ==
 ----
 \* Error conditions
 
-Dup ==
+LOCAL Dup ==
     /\ BagToSet(msgs) # {}
     /\ LET msg == CHOOSE m \in BagToSet(msgs) : TRUE
        IN msgs' = Send(msgs, msg)
 
-Loose ==
+LOCAL Loose ==
     /\ BagToSet(msgs) # {}
     /\ LET msg == CHOOSE m \in BagToSet(msgs) : TRUE
        IN msgs' = Recv(msgs, msg)

@@ -1,220 +1,96 @@
 ---- MODULE SlidingWindow ----
-\* This specification describes a protocol for using lossy, duplicating and
-\* reordering  transmission lines to transmit a sequence of values from a
-\* sender to a receiver. The sender sends a data value d by sending a sequence
-\* of (sn, d) messages on msgQ, where sn is a sequence number. The receiver
-\* requests more data by sending the sn it wants to receive on ackQ.
-\*
-\* In this model we assume that sequence numbers are unbounded and the window
-\* size is constant.
-EXTENDS
-    Naturals,
-    Sequences,
-    UnreliableChannel
+EXTENDS Naturals, Sequences
 
-CONSTANTS
-    Data, \* The set of data values that can be sent
-    N     \* window size
+CONSTANTS MaxMsgsTransit, MaxSeqNum, StartWinSize, Payload, PacketType
+VARIABLE msgs, seq_num, send_win, recv_win
 
-VARIABLES
-    \* The sequence of packets sent by the sender.
-    sendQ,
-    \* The sequence of packets received by the receiver.
-    recvQ,
-    \* The sequence of packets in transit to the receiver.
-    msgQ,
-    \* The sequence of acks in transit to the sender.
-    ackQ,
-    \* The last sequence number sent.
-    sSn,
-    \* The sender window.
-    sWin,
-    \* The receiver window.
-    rWin
+vars == <<msgs, seq_num, send_win, recv_win>>
+Node == 0..1
 
-ASSUME N \in Nat /\ N > 0
+ASSUME "data" \in PacketType /\ "ack" \in PacketType
 
-\* Types
-Sn == Nat
-Packet == [sn: Sn, d: Data]
-Win == [base: Sn, max: Sn, q: Seq(Packet)]
+----
+\* Packet definition
 
-RCSpec == INSTANCE ReliableChannelSpec WITH Data <- Packet
+SeqNum == 0..MaxSeqNum
+NextSeqNum(sn) == IF sn = MaxSeqNum THEN 0 ELSE sn + 1
 
-\* Contains takes a sequence and a predicate and evaluates to true if any
-\* element of the sequence satisfies the predicate.
-Contains(seq, p) == \E i \in 1..Len(seq): p[seq[i]]
+Packet == [type: PacketType, seq_num: SeqNum, payload: Payload]
+----
+\* Window definition
 
-\* Filter takes a sequence and a predicate and returns a sequence containing
-\* only the elements where predicate evaluates to true.
-Filter[seq \in Seq(Packet), sn \in Sn] ==
-    IF seq = <<>>
-    THEN <<>>
-    ELSE
-        LET tail == Filter[Tail(seq), sn]
-        IN IF Head(seq).sn < sn
-           THEN tail
-           ELSE <<Head(seq)>> \o tail
+Remove[seq \in Seq(Packet), elem \in Packet] ==
+    IF seq = << >>
+    THEN << >>
+    ELSE LET head == Head(seq)
+             tail == Remove[Tail(seq), elem]
+         IN IF head = elem THEN tail ELSE Append(head, tail)
 
-\* Insert takes a sequence, a predicate and an element and inserts the
-\* element before the first element satisfying the predicate.
-Insert[seq \in Seq(Packet), p \in Packet] ==
-    IF seq = <<>>
-    THEN <<p>>
-    ELSE
-        IF Head(seq).sn > p.sn
-        THEN <<p>> \o seq
-        ELSE <<Head(seq)>> \o Insert[Tail(seq), p]
+Window == [base: SeqNum, size: SeqNum, packets: Seq(Packet)]
 
-\* Moves the window to b.
-WinMove[w \in Win, b \in Sn] == [base |-> b, max |-> b + N, q |-> w.q]
+WindowInit == [base |-> 0, size |-> StartWinSize, packets |-> << >>]
 
-\* Moves the window until all ordered messages are removed.
-WinMoveOrdered[w \in Win] ==
-    IF w.q # << >> /\ w.base = Head(w.q).sn
-    THEN
-       LET w1 == WinMove[w, w.base + 1]
-           w2 == [w1 EXCEPT !.q = Tail(w.q)]
-           res == WinMoveOrdered[w2]
-           w3 == res[1]
-           r1 == res[2]
-           r2 == <<Head(w.q)>> \o r1
-       IN <<w3, r2>>
-    ELSE <<w, << >>>>
+SeqNumIn(win, sn) ==
+    IF win.base + win.size <= MaxSeqNum
+    THEN sn >= win.base /\ sn < win.base + win.size
+    ELSE \/ sn >= win.base /\ sn <= MaxSeqNum
+         \/ sn >= 0 /\ sn < win.base + win.size - MaxSeqNum
 
-\* Moves the window and removes acked messages.
-WinMoveBase[w \in Win, b \in Sn] ==
-    LET nw == WinMove[w, b]
-        nq == Filter[nw.q, nw.base]
-    IN [nw EXCEPT !.q = nq]
+PacketIn(win, sn) ==
+    \E n \in 1..Len(win.packets) : win.packets[n].seq_num = sn
 
-\* Inserts a message into the receive window.
-WinInsert[w \in Win, p \in Packet] ==
-    IF /\ w.base <= p.sn                                  \* If the sequence number is in the window
-       /\ p.sn <= w.max
-       /\ ~Contains(w.q, [q \in Packet |-> q.sn = p.sn])  \* and the packet isn't a duplicate.
-    THEN
-        [w EXCEPT !.q = Insert[@, p]]                     \* Insert the packet before a packet with a
-                                                          \* larger sequence number.
-    ELSE w
+WindowInv(win) ==
+    /\ Len(win.packets) <= win.size
+    /\ \A n \in 1..Len(win.packets) : SeqNumIn(win, n)
+
+InsertPacket(win, p) ==
+    IF /\ SeqNumIn(win, p.seq_num)
+       /\ ~PacketIn(win, p.seq_num)
+    THEN [win EXCEPT !.packets = Append(@, p)]
+    ELSE win
+
+DeliverPackets[win \in Window] ==
+    IF PacketIn(win, win.base)
+    THEN LET n == CHOOSE n \in 1..Len(win.packets) : win.packets[n].seq_num = win.base
+             p == win.packets[n]
+             nwin == [win EXCEPT !.base = NextSeqNum(@), !.packets = Remove[@, p]]
+         IN DeliverPackets[nwin]
+    ELSE win
 
 ----
 
-\* The initial condition:
-\*   Both message queues are empty.
-\*   All the sequence numbers equal 0.
-\*   The initial value for recv is an arbitrary data values.
+LOCAL Socket == INSTANCE Socket WITH Payload <- Packet
+
 Init ==
-    /\ RCSpec!Init
-    /\ msgQ = <<>>
-    /\ ackQ = <<>>
-    /\ sSn = 0
-    /\ sWin = [base |-> 0, max |-> N, q |-> <<>>]
-    /\ rWin = sWin
+    /\ Socket!Init
+    /\ seq_num = [n \in Node |-> 0]
+    /\ send_win = [n \in Node |-> WindowInit]
+    /\ recv_win = [n \in Node |-> WindowInit]
 
-\* Invariant describing the relationship of the fields in a window.
-WindowInv(w) ==
-    /\ w.max >= w.base
-    /\ w.max - w.base = N
-    /\ Len(w.q) <= w.max - w.base
-    /\ \A i \in 1..Len(w.q) :
-        /\ w.q[i].sn >= w.base
-        /\ w.q[i].sn <= w.max
-
-\* The type correctness invariant.
 TypeInv ==
-    /\ RCSpec!TypeInv
-    /\ msgQ \in Seq(Packet)
-    /\ ackQ \in Seq(Sn)
-    /\ sSn \in Sn
-    /\ sWin \in Win
-    /\ WindowInv(sWin)
-    /\ rWin \in Win
-    /\ WindowInv(rWin)
+    /\ Socket!TypeInv
+    /\ seq_num \in [Node -> SeqNum]
+    /\ send_win \in [Node -> Window]
+    /\ recv_win \in [Node -> Window]
+    /\ \A n \in Node : WindowInv(send_win[n])
+    /\ \A n \in Node : WindowInv(recv_win[n])
+
+Constraint ==
+    /\ Socket!Constraint
 
 ----
 
-\* The action in which the sender sends a new data value.
-SendMsg(d) ==
-    /\ sSn < sWin.max                                   \* Enabled iff there is still credit in the window.
-    /\ sSn' = sSn + 1                                   \* Increment the sequence number.
-    /\ LET p == [sn |-> sSn, d |-> d]
-       IN
-        /\ sWin' = [sWin EXCEPT !.q = Append(sWin.q, p)]\* Add packet to the window.
-        /\ msgQ' = Append(msgQ, p)                      \* Send value on msgQ with sequence number.
-        /\ RCSpec!Send(p)
-    /\ UNCHANGED <<recvQ, ackQ, rWin>>
+NodeNext(n) ==
+    /\ LET p == CHOOSE p \in Packet : TRUE
+           w == recv_win[n]
+           x == InsertPacket(w, p)
+           y == DeliverPackets[x]
+       IN recv_win' = [recv_win EXCEPT ![n] = y]
+    /\ UNCHANGED <<msgs, seq_num, send_win>>
 
-\* The sender resends a message from the window on msgQ.
-ReSendMsg(i) ==
-    /\ i <= Len(sWin.q)                                 \* Enabled iff the index is in range.
-    /\ msgQ' = Append(msgQ, sWin.q[i])                  \* Resend the ith message from the window.
-    /\ UNCHANGED <<sendQ, recvQ, ackQ, sSn, sWin, rWin>>
-
-\* The sender resends any message from the window on msgQ.
-ReSendAnyMsg == \E i \in 1..Len(sWin.q) : ReSendMsg(i)
-
-\* The receiver receives the message at the head of msgQ.
-RecvMsg ==
-    /\ msgQ # << >>                          \* Enabled iff msgQ not empty.
-    /\ msgQ' = Tail(msgQ)                    \* Remove message from head of msgQ.
-    /\ \* Inserts the packet into the window if it is not a duplicate and filters
-       \* any complete sequences of packets from the window.
-       LET w1 == WinInsert[rWin, Head(msgQ)]
-           res == WinMoveOrdered[w1]
-       IN /\ rWin' = res[1]
-          /\ recvQ' = recvQ \o res[2]
-          \* Instead of using Recv from ReliableChannelSpec
-          \* so that we can add batches of packets.
-    /\ UNCHANGED <<sendQ, ackQ, sSn, sWin>>
-
-\* The receiver sends receiver window base on ackQ at any time.
-SendAck ==
-    /\ ackQ' = Append(ackQ, rWin.base)
-    /\ UNCHANGED <<sendQ, recvQ, msgQ, sSn, sWin, rWin>>
-
-\* The sender receives an ack on ackQ
-RecvAck ==
-    /\ ackQ # << >>                    \* Enabled iff ackQ not empty.
-    /\ ackQ' = Tail(ackQ)              \* Remove ack from head of ackQ.
-    /\ sWin' =                         \* Iff ack larger than base move sWin
-        IF Head(ackQ) > sWin.base      \* to new base (and drop all acked messages).
-        THEN WinMoveBase[sWin, Head(ackQ)]
-        ELSE sWin
-    /\ UNCHANGED <<sendQ, recvQ, msgQ, sSn, rWin>>
-
-\* Message queue failure.
-MsgQFail == Fail(msgQ) /\ UNCHANGED <<sendQ, recvQ, ackQ, sSn, sWin, rWin>>
-
-\* Ack queue failure.
-AckQFail == Fail(ackQ) /\ UNCHANGED <<sendQ, recvQ, msgQ, sSn, sWin, rWin>>
-
-\* The next state action.
 Next ==
-    \/ \E d \in Data : SendMsg(d)
-    \/ ReSendAnyMsg
-    \/ RecvMsg
-    \/ SendAck
-    \/ RecvAck
-    \/ MsgQFail
-    \/ AckQFail
+    \/ \E n \in Node : NodeNext(n)
+    \/ Socket!Fail
 
-----
-
-\* The tuple of all variables.
-vars == <<sendQ, recvQ, msgQ, ackQ, sSn, sWin, rWin>>
-
-\* The liveness condition
-Fairness ==
-    /\ WF_vars(ReSendAnyMsg)
-    /\ WF_vars(SendAck)
-    /\ SF_vars(RecvMsg)
-    /\ SF_vars(RecvAck)
-    /\ RCSpec!Liveness
-
-\* The complete specification
-Spec == Init /\ [][Next]_vars /\ Fairness
-
-\* Correctess proofs
-THEOREM Spec => []TypeInv
+Spec == Init /\ [][Next]_vars
 ====
