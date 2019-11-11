@@ -7,15 +7,12 @@ EXTENDS Naturals, Sequences
 a request is forwarded to is irrelevant, no peer can be impersonated (sources are cryptographically signed),
 load is modelled as binary, fixed number of peers guaranteed to be honest *)
 --------------------------------------------------------------------------------
-CONSTANT Peers, Honest, LoadBound, Resource, TrustBound, Self
+CONSTANT Honest, Dishonest, Self, LoadBound, Resource, MaxTrust
 VARIABLES q, load, out, trust, None
 ASSUME /\ LoadBound \in Nat
        /\ LoadBound > 0
 
-ASSUME /\ Honest \subseteq Peers
-
-(* Maybe remove later to model adversary *)
-ASSUME /\ Self \in Honest
+Peers == Honest \cup Dishonest \cup { Self }
 
 (* This queue contains incoming packets from other peers with given priority *)
 Priority == Nat
@@ -26,14 +23,13 @@ Sorted(queue) == \A << index1, index2 >> \in {1..Len(queue)} \X {1..Len(queue)} 
 
 (* the buffer of the incoming requests to be serviced, sorted BY effective priority *)
 Type_q == /\ q \in Seq(Packet)
-          /\ Sorted(q)
 (* does the load of the network at our peer exceed a chosen threshold? *)
 Type_load == load \in {0,1}
 (* an outgoing, sent request *)
 Type_out == out \in Packet \cup {None}
 (* trust of peer self IN neighbours *)
 Type_trust == /\ trust \in [Peers -> Nat]
-              /\ \A peer \in Peers : trust[peer] <= Trustbound
+              /\ \A peer \in Peers : trust[peer] <= MaxTrust
 (* neighbours trust IN peer self *)
 (* TODO *)
 
@@ -60,7 +56,7 @@ MAX(x, y) == IF x >= y THEN x ELSE y
 EFFTRUST(pkt) == [pkt EXCEPT !.p = MIN(pkt.p, trust[pkt.src])]
 LOAD(qs) == IF Len(qs) >= LoadBound THEN 1 ELSE 0
 DEBIT(pkt) == [trust EXCEPT ![pkt.src] = MIN(@ - EFFTRUST(pkt), 0) ]
-CREDIT(pkt) == [trust EXCEPT ![pkt.src] = MAX(@ + pkt.p, Trustbound) ]
+CREDIT(pkt) == [trust EXCEPT ![pkt.src] = MAX(@ + pkt.p, MaxTrust) ]
 
 (* if the load is zero, anonymous relay operation *)
 (* Append == /\ *)
@@ -83,7 +79,7 @@ Rcv == Rcv_load \/ Rcv_noload
 
 Next == Rcv (* \/ \E d \in Nat : Send(d) *)
 
-SPEC == Init /\ [][Next]_<< q, load, out, trust >>
+Spec == Init /\ [][Next]_<< q, load, out, trust >>
 ================================================================================
-THEOREM SPEC => []TypeInvariant
+THEOREM Spec => []TypeInvariant
 ================================================================================

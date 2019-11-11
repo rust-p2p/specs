@@ -1,0 +1,3 @@
+---- MODULE MCIncentives ----
+EXTENDS Incentives
+====
