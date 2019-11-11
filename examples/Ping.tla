@@ -1,41 +1,47 @@
 ---- MODULE Ping ----
-EXTENDS BoundedTimer, Naturals, Sequences, Socket
+EXTENDS BoundedTimer, Naturals, Sequences
 
-VARIABLES state, timer
+CONSTANT Node, MaxMsgsTransit
+VARIABLES msgs, state, timer
+
+Payload == {"ping", "pong"}
+Socket == INSTANCE Socket
 
 State == { "ready", "wait_pong" }
 
+Constraint == Socket!Constraint
+
 Init ==
-    /\ SocketInit
+    /\ Socket!Init
     /\ state = [n \in Node |-> "ready"]
     /\ timer = [n \in Node |-> MaxTimer]
 
 TypeInv ==
-    /\ SocketTypeInv({"ping", "pong"})
+    /\ Socket!TypeInv
     /\ state \in [Node -> State]
     /\ timer \in [Node -> Timer]
 
 Ping(n) ==
     /\ state[n] = "ready"
-    /\ msgs' = Send(msgs, Msg(n, 1 - n, "ping"))
+    /\ msgs' = Socket!Send(msgs, Socket!Msg(n, 1 - n, "ping"))
     /\ state' = [state EXCEPT ![n] = "wait_pong"]
     /\ timer' = [timer EXCEPT ![n] = 1]
 
 Pong(n) ==
-    /\ RecvEn(n, 1 - n)
-    /\ LET rmsg == PeekRecv(n, 1 - n)
-           smsg == Msg(n, 1 - n, "pong")
+    /\ Socket!RecvEn(n, 1 - n)
+    /\ LET rmsg == Socket!PeekRecv(n, 1 - n)
+           smsg == Socket!Msg(n, 1 - n, "pong")
        IN /\ rmsg.payload = "ping"
-          /\ msgs' = Send(Recv(msgs, rmsg), smsg)
+          /\ msgs' = Socket!Send(Socket!Recv(msgs, rmsg), smsg)
     /\ UNCHANGED <<state, timer>>
 
 RecvPong(n) ==
     /\ state[n] = "wait_pong"
     /\ ~TimedOut(timer[n])
-    /\ RecvEn(n, 1 - n)
-    /\ LET msg == PeekRecv(n, 1 - n)
+    /\ Socket!RecvEn(n, 1 - n)
+    /\ LET msg == Socket!PeekRecv(n, 1 - n)
        IN /\ msg.payload = "pong"
-          /\ msgs' = Recv(msgs, msg)
+          /\ msgs' = Socket!Recv(msgs, msg)
     /\ state' = [state EXCEPT ![n] = "ready"]
     /\ timer' = [timer EXCEPT ![n] = MaxTimer]
  
@@ -48,10 +54,10 @@ TimeoutPong(n) ==
 
 DropPong(n) ==
     /\ state[n] # "wait_pong"
-    /\ RecvEn(n, 1 - n)
-    /\ LET msg == PeekRecv(n, 1 - n)
+    /\ Socket!RecvEn(n, 1 - n)
+    /\ LET msg == Socket!PeekRecv(n, 1 - n)
        IN /\ msg.payload = "pong"
-          /\ msgs' = Recv(msgs, msg)
+          /\ msgs' = Socket!Recv(msgs, msg)
     /\ UNCHANGED <<state, timer>>
 
 Tick ==
@@ -65,7 +71,7 @@ Next ==
     \/ \E n \in Node : RecvPong(n)
     \/ \E n \in Node : TimeoutPong(n)
     \/ \E n \in Node : DropPong(n)
-    \/ Fail /\ UNCHANGED <<state, timer>>
+    \/ Socket!Fail /\ UNCHANGED <<state, timer>>
     \/ Tick
 
 vars == <<state, timer, msgs>>
