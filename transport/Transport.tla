@@ -6,7 +6,7 @@
 \* # Handshake phase
 \* 
 \* ## Message format
-\* (drf: bool, seq_num: u16, handshake: [u8], payload: [u8])
+\* (drf: bool, seq_num: u64, handshake: [u8], payload: [u8])
 \*
 \* ## Protocol 
 \* XXsig:
@@ -17,7 +17,7 @@
 \* # Transport phase
 \* 
 \* ## Message format
-\* (nonce: u64, mac: u16, seq_num: u16, ack_seq_num: u16, len: u16, payload: [])
+\* (nonce: u64, mac: u16, seq_num: u64, ack_seq_num: u64, len: u16, payload: [])
 \*
 \* ## Protocol
 \* Messages with a seq_num of 0 do not require an ack or retransmission. Such
@@ -30,16 +30,49 @@
 \*
 \* # Congestion control
 
-Token == {"e", "ee", "s", "sig"}
+CONSTANT Data
 
-Message == Seq(Token)
+VARIABLE conns
 
-Handshake == Seq(Message)
+Conn == [
+    sSn: Nat,
+    msgs: Seq(Data)
+]
 
-XXsig == <<
-  <<"e">>,
-  <<"e", "ee", "s", "sig">>,
-  <<"s", "sig">>,
->>
+HandshakeMessage == [drf: BOOLEAN, sn: Nat]
+
+TransportMessage == [
+    nonce: Nat,
+    mac: Nat,
+    seq_num: Nat,
+    ack_seq_num: Nat
+]
+
+Init ==
+    /\ conns = << >>
+
+TypeInv ==
+    /\ conns \in Seq(Conn)
+
+Open ==
+    /\ conns' = Append(conns, [msgs |-> << >>])
+
+
+----
+
+Encrypt[conn \in Conn, data \in Data] == [conn EXCEPT !.msgs = Append(@, data)]
+
+Decrypt[conn \in Conn, nonce \in Nat] == conn.msgs[nonce]
+
+Send(c, d) ==
+    /\ c \in 1..Len(conns)
+    /\ 'conns = [conns EXCEPT ![c] = Encrypt[@, d]]
+
+Recv(c, n) ==
+    /\ c \in 1..Len(conns)
+    /\ LET msg == Decrypt[conns[c], n]
+       IN
+
+
 
 ====
