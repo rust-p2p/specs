@@ -152,9 +152,13 @@ NodeNext(n) ==
     \/ SendAck(1 - n)
     \/ RecvMsg(1 - n)
 
+Fail ==
+    /\ Socket!Fail
+    /\ UNCHANGED <<seq_num, send_win, recv_win, channels>>
+
 Next ==
     \/ NodeNext(0)
-    \/ Socket!Fail /\ UNCHANGED <<seq_num, send_win, recv_win, channels>>
+    \/ Fail
 
 Liveness == \A n \in Node : Channel!Liveness(channels[n])
 
