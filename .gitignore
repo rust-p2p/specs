@@ -1,3 +1,5 @@
 *.tex
 *.log
+*.dump
+*.dot
 states/

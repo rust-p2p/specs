@@ -1,0 +1,3 @@
+---- MODULE MCConnection ----
+EXTENDS Connection
+====
