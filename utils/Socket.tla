@@ -1,5 +1,5 @@
 ---- MODULE Socket ----
-EXTENDS Bags, Naturals
+EXTENDS Naturals, Sequences
 
 CONSTANTS Node, MaxMsgsTransit, Payload
 VARIABLE msgs
@@ -7,17 +7,20 @@ VARIABLE msgs
 Packet == [src: Node, dst: Node, payload: Payload]
 
 Init ==
-    /\ msgs = EmptyBag
+    /\ msgs = << >>
 
 TypeInv ==
-    /\ IsABag(msgs)
-    /\ \A msg \in BagToSet(msgs) : msg \in Packet
+    /\ msgs \in Seq(Packet)
 
-Constraint == BagCardinality(msgs) <= MaxMsgsTransit
+Constraint == Len(msgs) <= MaxMsgsTransit
 
-Send(ms, m) == ms \oplus SetToBag({m})
+Send(ms, m) == Append(ms, m)
 
-Recv(ms, m) == ms \ominus SetToBag({m})
+LOCAL Remove(ms, i) ==
+    [j \in 1..(Len(ms) - 1) |->
+        IF j >= i THEN ms[j + 1] ELSE ms[j]]
+
+Recv(ms, i) == Remove(ms, i)
 
 ----
 \* Socket methods
@@ -25,28 +28,40 @@ Recv(ms, m) == ms \ominus SetToBag({m})
 Msg(n, to, payload) == [src |-> n, dst |-> to, payload |-> payload]
 
 RecvEn(n, from) ==
-    \E msg \in BagToSet(msgs) :
-        /\ msg.src = from
-        /\ msg.dst = n
+    \E i \in 1..Len(msgs) :
+        /\ msgs[i].src = from
+        /\ msgs[i].dst = n
 
 PeekRecv(n, from) ==
-    CHOOSE msg \in BagToSet(msgs) :
-        /\ msg.src = from
-        /\ msg.dst = n
+    LET i == CHOOSE i \in 1..Len(msgs) :
+        /\ msgs[i].src = from
+        /\ msgs[i].dst = n
+    IN i
 
 ----
 \* Error conditions
 
 LOCAL Dup ==
-    /\ BagToSet(msgs) # {}
-    /\ LET msg == CHOOSE m \in BagToSet(msgs) : TRUE
-       IN msgs' = Send(msgs, msg)
+    /\ msgs # << >>
+    /\ msgs' = Append(msgs, Head(msgs))
 
 LOCAL Loose ==
-    /\ BagToSet(msgs) # {}
-    /\ LET msg == CHOOSE m \in BagToSet(msgs) : TRUE
-       IN msgs' = Recv(msgs, msg)
+    /\ msgs # << >>
+    /\ msgs' = Tail(msgs)
 
-Fail == Dup \/ Loose
+LOCAL Trans ==
+    /\ Len(msgs) > 1
+    /\ msgs' = <<msgs[2], msgs[1]>> \o Tail(Tail(msgs))
+
+LOCAL Shift1 ==
+    /\ Len(msgs) > 1
+    /\ msgs' = [i \in 1..Len(msgs) |->
+        IF i = Len(msgs)
+        THEN msgs[1]
+        ELSE msgs[i + 1]
+       ]
+
+\* Trans and Shift1 are capable of producing all permutations.
+Fail == Dup \/ Loose \/ Trans \/ Shift1
 
 ====
