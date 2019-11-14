@@ -28,20 +28,6 @@ AckPacket(sn) ==
 ----
 \* Window definition
 
-Remove[seq \in Seq(Packet), elem \in Packet] ==
-    IF seq = << >>
-    THEN << >>
-    ELSE LET head == Head(seq)
-             tail == Remove[Tail(seq), elem]
-         IN IF head = elem THEN tail ELSE <<head>> \o tail
-
-Filter[seq \in Seq(Packet), sn \in SeqNum] ==
-    IF seq = << >>
-    THEN << >>
-    ELSE LET head == Head(seq)
-             tail == Filter[Tail(seq), sn]
-         IN IF head.seq_num < sn THEN tail ELSE <<head>> \o tail
-
 Window == [base: SeqNum, size: SeqNum, packets: Seq(Packet)]
 
 WindowInit == [base |-> 0, size |-> StartWinSize, packets |-> << >>]
@@ -69,9 +55,11 @@ DeliverPackets[win \in Window, packets \in Seq(Payload)] ==
     IF PacketIn(win, win.base)
     THEN LET n == CHOOSE n \in 1..Len(win.packets) : win.packets[n].seq_num = win.base
              p == win.packets[n]
-             nwin == [win EXCEPT !.base = NextSeqNum(@), !.packets = Remove[@, p]]
-             npackets == <<p>> \o packets
-         IN DeliverPackets[nwin, packets]
+             nwin == [win EXCEPT
+                 !.base = NextSeqNum(@),
+                 !.packets = SelectSeq(@, LAMBDA x: x # p)]
+             npackets == Append(packets, p.payload)
+         IN DeliverPackets[nwin, npackets]
     ELSE <<win, packets>>
 
 WindowInv(win) ==
@@ -131,7 +119,8 @@ SendAck(n) ==
 
 RecvMsg(n) ==
     /\ Socket!RecvEn(n, 1 - n)
-    /\ LET msg == Socket!PeekRecv(n, 1 - n)
+    /\ LET i == Socket!PeekRecv(n, 1 - n)
+           msg == msgs[i]
            packet == msg.payload
        IN /\ \/ /\ packet.type = "data"
                 /\ LET res == DeliverPackets[InsertPacket(recv_win[n], packet), << >>]
@@ -140,10 +129,12 @@ RecvMsg(n) ==
                 /\ UNCHANGED send_win
              \/ /\ packet.type = "ack"
                 /\ LET base == Max(packet.seq_num, send_win[n].base)
-                       win == [send_win[n] EXCEPT !.base = base, !.packets = Filter[@, base]]
+                       win == [send_win[n] EXCEPT
+                           !.base = base,
+                           !.packets = SelectSeq(@, LAMBDA x: x.seq_num >= base)]
                    IN send_win' = [send_win EXCEPT ![n] = win]
                 /\ UNCHANGED <<recv_win, channels>>
-          /\ msgs' = Socket!Recv(msgs, msg)
+          /\ msgs' = Socket!Recv(msgs, i)
     /\ UNCHANGED seq_num
 
 NodeNext(n) ==
