@@ -1,10 +1,12 @@
 ---- MODULE Socket ----
-EXTENDS Naturals, Sequences
+EXTENDS Naturals, Sequences, SeqUtils
 
-CONSTANTS Node, MaxMsgsTransit, Payload
+CONSTANTS Node, MaxMsgsTransit, MaxTTL, Payload
 VARIABLE msgs
 
-Packet == [src: Node, dst: Node, payload: Payload]
+TTL == 0..MaxTTL
+
+Packet == [src: Node, dst: Node, ttl: TTL, payload: Payload]
 
 Init ==
     /\ msgs = << >>
@@ -25,7 +27,7 @@ Recv(ms, i) == Remove(ms, i)
 ----
 \* Socket methods
 
-Msg(n, to, payload) == [src |-> n, dst |-> to, payload |-> payload]
+Msg(n, to, payload) == [src |-> n, dst |-> to, ttl |-> MaxTTL, payload |-> payload]
 
 RecvEn(n, from) ==
     \E i \in 1..Len(msgs) :
@@ -37,6 +39,14 @@ PeekRecv(n, from) ==
         /\ msgs[i].src = from
         /\ msgs[i].dst = n
     IN i
+
+----
+\* TTL
+
+Tick ==
+    LET filter == SeqFilter(msgs, LAMBDA msg: msg.ttl > 1)
+        map == SeqMap(filter, LAMBDA msg: [msg EXCEPT !.ttl = @ - 1])
+    IN msgs' = map
 
 ----
 \* Error conditions

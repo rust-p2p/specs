@@ -1,7 +1,7 @@
 ---- MODULE SlidingWindow ----
 EXTENDS Naturals, Sequences
 
-CONSTANTS MaxMsgs, MaxMsgsTransit, MaxSeqNum, StartWinSize, Payload, PacketType
+CONSTANTS MaxMsgs, MaxMsgsTransit, MaxSeqNum, MaxTTL, StartWinSize, Payload, PacketType
 VARIABLE msgs, seq_num, send_win, recv_win, channels
 
 vars == <<msgs, seq_num, send_win, recv_win, channels>>
@@ -146,6 +146,8 @@ NodeNext(n) ==
 Fail ==
     /\ Socket!Fail
     /\ UNCHANGED <<seq_num, send_win, recv_win, channels>>
+
+Tick == Socket!Tick
 
 Next ==
     \/ NodeNext(0)
