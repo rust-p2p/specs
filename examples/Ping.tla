@@ -29,19 +29,21 @@ Ping(n) ==
 
 Pong(n) ==
     /\ Socket!RecvEn(n, 1 - n)
-    /\ LET rmsg == Socket!PeekRecv(n, 1 - n)
+    /\ LET i == Socket!PeekRecv(n, 1 - n)
+           rmsg == msgs[i]
            smsg == Socket!Msg(n, 1 - n, "pong")
        IN /\ rmsg.payload = "ping"
-          /\ msgs' = Socket!Send(Socket!Recv(msgs, rmsg), smsg)
+          /\ msgs' = Socket!Send(Socket!Recv(msgs, i), smsg)
     /\ UNCHANGED <<state, timer>>
 
 RecvPong(n) ==
     /\ state[n] = "wait_pong"
     /\ ~TimedOut(timer[n])
     /\ Socket!RecvEn(n, 1 - n)
-    /\ LET msg == Socket!PeekRecv(n, 1 - n)
+    /\ LET i == Socket!PeekRecv(n, 1 - n)
+           msg == msgs[i]
        IN /\ msg.payload = "pong"
-          /\ msgs' = Socket!Recv(msgs, msg)
+          /\ msgs' = Socket!Recv(msgs, i)
     /\ state' = [state EXCEPT ![n] = "ready"]
     /\ timer' = [timer EXCEPT ![n] = MaxTimer]
  
@@ -55,9 +57,10 @@ TimeoutPong(n) ==
 DropPong(n) ==
     /\ state[n] # "wait_pong"
     /\ Socket!RecvEn(n, 1 - n)
-    /\ LET msg == Socket!PeekRecv(n, 1 - n)
+    /\ LET i == Socket!PeekRecv(n, 1 - n)
+           msg == msgs[i]
        IN /\ msg.payload = "pong"
-          /\ msgs' = Socket!Recv(msgs, msg)
+          /\ msgs' = Socket!Recv(msgs, i)
     /\ UNCHANGED <<state, timer>>
 
 Tick ==
