@@ -15,7 +15,7 @@ ASSUME /\ LoadBound \in Nat
 Peers == Honest \cup Dishonest \cup { Self }
 
 (* This queue contains incoming packets from other peers with given priority *)
-Priority == Nat
+Priority == 0..1
 Packet == [src : Peers, type : {0, 1}, res : Resource, p : Priority]
 Request(pkt) == pkt.type = 0
 Reply(pkt) == pkt.type = 1
