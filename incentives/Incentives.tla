@@ -1,85 +1,101 @@
----- MODULE Incentives -----------------------------------------------------
-EXTENDS Naturals, Sequences
+---- MODULE IncentivesR -----------------------------------------------------
+EXTENDS Naturals, Sequences, Bags
 (* Documentation *)
 (* This specification deals with the handling of packets according to the incentive scheme *)
 
-(* Implicit assumptions include reliable transport layer WITH no delay, the neighbour
+(* Implicit assumptions include reliable transport layer with no delay, the neighbour
 a request is forwarded to is irrelevant, no peer can be impersonated (sources are cryptographically signed),
 load is modelled as binary, fixed number of peers guaranteed to be honest *)
 --------------------------------------------------------------------------------
-CONSTANT Honest, Dishonest, Self, LoadBound, Resource, MaxTrust
-VARIABLES q, load, out, trust, None
-ASSUME /\ LoadBound \in Nat
-       /\ LoadBound > 0
+(* CONSTANT Peers *)
+VARIABLES trust, relaytable, b_in0, q_out
+vars == <<trust, relaytable, b_in0, q_out>>
 
-Peers == Honest \cup Dishonest \cup { Self }
-
-(* This queue contains incoming packets from other peers with given priority *)
+(* For the moment these are fixed *)
+Peers == 0..1
+Resources == 0..0
 Priority == 0..1
-Packet == [src : Peers, type : {0, 1}, res : Resource, p : Priority]
-Request(pkt) == pkt.type = 0
-Reply(pkt) == pkt.type = 1
-Sorted(queue) == \A << index1, index2 >> \in {1..Len(queue)} \X {1..Len(queue)} : ((index1 <= index2) => (queue.p[index1] >= queue.p[index2]))
+MaxTrust == 2
+MaxIn == <<2,2>>
+LoadBound == <<1,1>>
+OutBound == 1
+Packet == [src : Peers, dst : Peers, type : {1,2}, pr : Priority, res : Resources]
 
-(* the buffer of the incoming requests to be serviced, sorted BY effective priority *)
-Type_q == /\ q \in Seq(Packet)
-(* does the load of the network at our peer exceed a chosen threshold? *)
-Type_load == load \in {0,1}
-(* an outgoing, sent request *)
-Type_out == out \in Packet \cup {None}
-(* trust of peer self IN neighbours *)
-Type_trust == /\ trust \in [Peers -> Nat]
-              /\ \A peer \in Peers : trust[peer] <= MaxTrust
-(* neighbours trust IN peer self *)
-(* TODO *)
+Add(B,elt) == B (+) SetToBag({elt})
+Min(x, y) == IF x >= y THEN y ELSE x
+(* Min(x) == x *)
+Max(x, y) == IF x >= y THEN x ELSE y
+EffPriority(p,paket) == Min(paket.pr, trust[p,paket.src])
+Debit(p,paket) == [trust EXCEPT ![p,paket.src] = Min(@ - paket.pr, 0) ]
+Credit(p,paket) == [trust EXCEPT ![p,paket.src] = Max(@ + paket.pr, MaxTrust) ]
 
-TypeInvariant == /\ Type_q
-                 /\ Type_load
-                 /\ Type_out
-                 /\ Type_trust
+TypeInv ==
+    (* /\ trust \in [Peers \X Peers -> 0..MaxTrust+1] *)
+    /\ \A <<p1,p2>> \in Peers \X Peers : /\ p1 # p2 => trust[p1,p2] \in 0..MaxTrust
+                                         /\ p1 = p2 => trust[p1,p2] = MaxTrust + 1
+    /\ \A p \in Peers : IsABag(relaytable[p])
+    /\ \A p \in Peers : IsABag(b_in0[p])
+    (* /\ \A p \in Peers : BagCardinality(b_in[p]) < 0 *)
+    (* /\ b_in \in [Peers -> Seq(Packet)] *)
+    /\ q_out \in [Peers -> Seq(Packet)]
 
 --------------------------------------------------------------------------------
 
-Init_q == <<>>
-Init_load == 0
-Init_out == None
-Init_trust == \A peer \in Peers : trust[peer] = 0
+Init ==
+    (* /\ TypeInv *)
+    /\ relaytable = [peer \in Peers |-> EmptyBag]
+    /\ b_in0 = [peer \in Peers |-> EmptyBag]
+    /\ q_out = [peer \in Peers |-> << >>]
+    /\ trust = [<<p1,p2>> \in Peers \X Peers |-> IF p1 = p2 THEN MaxTrust + 1 ELSE 0]
 
-Init == /\ TypeInvariant
-        /\ Init_q
-        /\ Init_load
-        /\ Init_out
-        /\ Init_trust
+Send(p) ==
+    (* Send packet from peer p *)
+    /\ q_out[p] # << >>
+    /\ q_out' = [q_out EXCEPT ![p] = Tail(q_out[p])]
+    (* Receive the packet at peer pkt.dst *)
+    /\ LET pkt == Head(q_out[p])
+           receiver == pkt.dst
+       IN /\ pkt.type = 1 (* IF type is a request, check priority and add accordingly to queue *)
+          /\ \/ /\ BagCardinality(b_in0[receiver]) < LoadBound[1]
+                /\ b_in0' = [b_in0 EXCEPT ![receiver] = Add(b_in0[receiver],<<pkt,0>>)]
+                /\ UNCHANGED <<relaytable, trust>>
+                (* If enough packets in buffer start charging trust *)
+             \/ /\ BagCardinality(b_in0[receiver]) >= LoadBound[1]
+                /\ BagCardinality(b_in0[receiver]) < MaxIn[1]
+                /\ b_in0' = [b_in0 EXCEPT ![receiver] = Add(b_in0[receiver],
+                                                             <<pkt, EffPriority(receiver,pkt)>>)]
+                /\ trust' = [trust EXCEPT ![receiver,p] = @ - EffPriority(receiver,pkt)]
+                /\ UNCHANGED <<relaytable>>
+             (* If max packets in buffer start exchanging them, adapting trust accordingly *)
+             \/ /\ BagCardinality(b_in0[receiver]) = MaxIn[1]
+                /\ LET AllPkts == BagToSet(b_in0[receiver] (+) SetToBag({<<pkt, EffPriority(receiver,pkt)>>}))
+                       min == CHOOSE min \in AllPkts : \A elt \in AllPkts : elt[2] >= min[2]
+                   IN /\ b_in0' = [b_in0 EXCEPT ![receiver] = SetToBag(AllPkts) (-) SetToBag({min})]
+                      /\ trust' = [trust EXCEPT ![receiver,min[1].src] = Max(@ + min[2],MaxTrust),
+                                             ![receiver,pkt.src] = @ - EffPriority(receiver,pkt)]
+                /\ UNCHANGED <<relaytable>>
 
-MIN(x, y) == IF x >= y THEN y ELSE x
-MAX(x, y) == IF x >= y THEN x ELSE y
-EFFTRUST(pkt) == [pkt EXCEPT !.p = MIN(pkt.p, trust[pkt.src])]
-LOAD(qs) == IF Len(qs) >= LoadBound THEN 1 ELSE 0
-DEBIT(pkt) == [trust EXCEPT ![pkt.src] = MIN(@ - EFFTRUST(pkt), 0) ]
-CREDIT(pkt) == [trust EXCEPT ![pkt.src] = MAX(@ + pkt.p, MaxTrust) ]
+CreateReq ==
+    /\ \E p \in Peers : \E pkt \in Packet : /\ pkt.src = p
+                                            /\ pkt.dst # p
+                                            /\ pkt.type = 0
+                                            /\ q_out' = [q_out EXCEPT ![p] = Append(q_out[p],pkt)]
+                                            (* /\ Print(BagToSet(b_in[p]),TRUE) *)
+    /\ UNCHANGED <<b_in0, trust, relaytable>>
 
-(* if the load is zero, anonymous relay operation *)
-(* Append == /\ *)
+SendRcv ==
+    \E p \in Peers : Send(p)
 
-Relay == /\ q /= << >>
-         /\ out = None
-         /\ \E << peer, max >> \in Peers \ {Self} \X q : \A pkt \in q : /\ pkt.p <= max.p
-                                                                        /\ q' = q \ {max}
-         /\ load' = LOAD(q')
-         /\ trust' = DEBIT(Head(q))
+(* Process(p) == *)
+(*     /\ b_in[p] # EmptyBag *)
+(*     /\ LET pkt == CHOOSE pkt1 \in BagToSet(b_in[p]) : \A pkt2 \in BagToSet(b_in[p]) : pkt1.p >= pkt2.p *)
+(*        IN pkt.p = 1 *)
 
-Rcv_load == /\ load = 1
-            /\ \E << received, less >> \in Packet \X q :  /\ less.p < MIN(received.p, trust[received.src])
-                                                          /\ q' = Append(q \ {less}, EFFTRUST(received))
+Next ==
+    \/ CreateReq
+    \/ SendRcv
 
-Rcv_noload == /\ load = 0
-              /\ \E received \in Packet : q' = Append(q, received)
-
-Rcv == Rcv_load \/ Rcv_noload
-
-Next == Rcv (* \/ \E d \in Nat : Send(d) *)
-
-Spec == Init /\ [][Next]_<< q, load, out, trust >>
+Spec == Init /\ [][Next]_vars
 ================================================================================
-THEOREM Spec => []TypeInvariant
+THEOREM Spec => []TypeInv
 ================================================================================
