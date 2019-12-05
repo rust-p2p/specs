@@ -8,6 +8,9 @@ configuration can be found in `MC$.cfg`. To execute the model checker run
 `tlc MC$.tla`. The `tla-tools` can be installed on arch linux using
 `yay -S tla-tools`.
 
+`test` runs tests specified in a file `MCTest` and formats the output of `tlc`.
+`state` prints complete state after a specified test. Requires `rc` and `ssam` from `plan9port`.
+
 ## Search path
 To add a directory to the search path set the `TLA_JAVA_OPTS` variable.
 
