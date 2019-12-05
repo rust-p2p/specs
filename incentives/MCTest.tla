@@ -1,0 +1,3 @@
+---- MODULE MCTest ----
+EXTENDS Test
+======================

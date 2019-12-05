@@ -1,0 +1,2 @@
+#!/bin/bash
+tlc $1 | 9 grep 'TRUE|Error: Suc' | 9 sed '/TRUE/{N;s/\n//g;s/TRUE//g;s/"//g;}' | sort | uniq

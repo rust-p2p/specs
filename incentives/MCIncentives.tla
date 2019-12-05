@@ -1,8 +1,8 @@
----- MODULE MCIncentivesR ----
-EXTENDS IncentivesR
+---- MODULE MCIncentives ----
+EXTENDS Incentives
 
 Constraint ==
-    /\ \A p \in Peers : BagCardinality(b_in0[p]) <= 2
+    /\ \A <<p,t>> \in Peers \X Type : BagCardinality(b_in[p,t]) <= 2
 
 Constraint1 ==
     /\ \A p \in Peers : Len(q_out[p]) <= 2
