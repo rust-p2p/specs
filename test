@@ -1,2 +1,10 @@
-#!/bin/bash
-tlc $1 | 9 grep 'TRUE|Error: Suc' | 9 sed '/TRUE/{N;s/\n//g;s/TRUE//g;s/"//g;}' | sort | uniq
+#!/usr/lib/plan9/bin/rc
+# tlc $1 | 9 grep 'TRUE' | 9 sed '/TRUE/{N;s/\n//g;s/TRUE//g;s/"//g;}' | sort | uniq
+echo ''
+tlc $1 | tee >{ssam -n 'y/^$/ g/null/p' | grep 'state|counter|null' | sed 's|/\\ ||' >tmp1} \
+             >{grep 'Error: Suc' >tmp2} \
+             >{grep 'TRUE' | sed '/TRUE/{N;s/\n//g;s/TRUE//g;s/"//g;}' | sort | uniq >tmp3} \
+             >/dev/null
+sleep 1
+cat tmp1 tmp2 tmp3
+rm -f tmp^(1 2 3)

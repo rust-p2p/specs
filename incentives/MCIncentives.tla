@@ -2,11 +2,14 @@
 EXTENDS Incentives
 
 Constraint ==
-    /\ \A <<p,t>> \in Peers \X Type : BagCardinality(b_in[p,t]) <= 2
+    /\ \A <<p,t>> \in Peers \X Type : BagCardinality(in[p,t]) <= 1
 
 Constraint1 ==
-    /\ \A p \in Peers : Len(q_out[p]) <= 2
+    /\ \A p \in Peers : Len(out[p]) <= 1
 
 Constraint2 ==
-    /\ \A p \in Peers : Len(relaytable[p]) <= 2
+    /\ \A p \in Peers : BagCardinality(relay[p]) <= 1
+
+Constraint3 ==
+    /\ \A p \in Peers : BagCardinality(own[p]) <= 1
 ====
