@@ -168,7 +168,9 @@ Rply(p) ==
            pkt == max[1]
            answer == [src |-> p, dst |-> pkt.src, type |-> rply, pr |-> 0, res |-> pkt.res]
        IN /\ out' = [out EXCEPT ![p] = Append(@,answer)]
-          /\ UNCHANGED <<own, trust, in, relay, n>>
+          /\ Print(pkt,TRUE)
+          (* /\ in' = [in EXCEPT ![p,rqst] = Rm(@,pkt)] *)
+          /\ UNCHANGED <<own, trust, relay, n>>
 
 PrcRqst(p) ==
     \/ Rply(p)

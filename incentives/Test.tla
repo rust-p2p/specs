@@ -18,7 +18,7 @@ T ==
 
 TestInit ==
     (* CHANGE: how many tests in total *)
-    /\ Tests = <<T(* ,T,T *)>>
+    /\ Tests = <<T,T,T,T>>
     /\ counter = 1
     /\ done = 0
     /\ Init
@@ -28,10 +28,13 @@ Pre ==
     (* CHANGE: add setup for different tests *)
     /\ \/ /\ counter = 1
           /\ out' = [out EXCEPT ![0] = <<[src |-> 0, dst |-> 1, type |-> 1, pr |-> 4, res |-> 0]>>]
-          /\ UNCHANGED <<own,in,trust,relay>>
-       (* \/ /\ counter = 2 *)
-       (*    /\ out' = [out EXCEPT ![0] = <<2>>] *)
-       (*    /\ UNCHANGED <<own,trust, in, relay>> *)
+          /\ UNCHANGED <<n,own,in,trust,relay>>
+       \/ /\ counter = 2
+          /\ UNCHANGED <<out,n,own,trust, in, relay>>
+       \/ /\ counter = 3
+          /\ UNCHANGED <<out,n,own,trust, in, relay>>
+       \/ /\ counter = 4
+          /\ UNCHANGED <<out,n,own,trust, in, relay>>
     /\ Tests' = [Tests EXCEPT ![counter].state = 1]
     /\ UNCHANGED <<counter,done>>
 
@@ -40,13 +43,19 @@ Run ==
     (* CHANGE: Add operators/functions to test *)
     /\ \/ /\ counter = 1
           /\ Send(0,[src |-> 0, dst |-> 1, type |-> 1, pr |-> 4, res |-> 0])
-          /\ FALSE
-          (* /\ Rcv(1,[src |-> 0, dst |-> 2, type |-> 1, pr |-> 4, res |-> 0]) *)
+          (* /\ FALSE *)
+          /\ Rcv(1,[src |-> 0, dst |-> 1, type |-> 1, pr |-> 4, res |-> 0])
           (* /\ UNCHANGED <<trust,in>> *)
           (* /\ UNCHANGED vars *)
-       (* \/ /\ counter = 2 *)
-       (*    /\ *)
-       (*    /\ UNCHANGED <<trust, in, relay>> *)
+       \/ /\ counter = 2
+          /\ Rply(1)
+          (* /\ UNCHANGED <<out,relay>> *)
+       \/ /\ counter = 3
+          /\ \E pkt \in Packet : /\ Send(1,pkt)
+                                 (* /\ Rcv(0,pkt) *)
+          /\ UNCHANGED <<in,trust>>
+       \/ /\ counter = 4
+          /\ ConsumeRply(0)
     /\ Tests' = [Tests EXCEPT ![counter].state = 2]
     /\ UNCHANGED <<counter,done>>
 
@@ -56,9 +65,17 @@ Post1 ==
     /\ in[1,2] = EmptyBag
     /\ in[0,1] = EmptyBag
     /\ in[0,2] = EmptyBag
-Post2 == out[0] = <<>>
+
+Post2 == (* out[0] = <<2>> *)
+    /\ TRUE
+
+Post3 == (* out[0] = <<2>> *)
+    /\ TRUE
+
+Post4 ==
+    /\ trust[0,1] = 2
 (* CHANGE: Add postcondition to P *)
-P == <<Post1, Post2>>
+P == <<Post1, Post2, Post3, Post4>>
 
 Post ==
     /\ Tests[counter].state = 2
