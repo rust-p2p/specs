@@ -23,40 +23,56 @@ TestInit ==
     /\ done = 0
     /\ Init
 
+(* First Test, tests if Send(_) adds the packet to the queue, changing nothing else *)
+Pre1 ==
+    /\ counter = 1
+    /\ out' = [out EXCEPT ![0] = <<[src |-> 0, dst |-> 1, type |-> 1, pr |-> 4, res |-> 0]>>]
+    /\ UNCHANGED <<own,in,trust,relay,n>>
+
+Run1 ==
+    /\ counter = 1
+    /\ Send(0,[src |-> 0, dst |-> 1, type |-> 1, pr |-> 4, res |-> 0])
+    /\ UNCHANGED <<own,in,trust,relay,n>>
+    (* /\ Rcv(1,[src |-> 0, dst |-> 1, type |-> 1, pr |-> 4, res |-> 0]) *)
+
+Post1 ==
+    /\ in[1,1] = (<<[src |-> 0, dst |-> 1, type |-> 1, pr |-> 4, res |-> 0],0>> :> 1)
+    /\ in[1,2] = EmptyBag
+    /\ in[0,1] = EmptyBag
+    /\ in[0,2] = EmptyBag
+
+(* Pre2 == *)
+(*     /\ counter = 2 *)
+(*     /\  *)
+    (* /\ UNCHANGED vars *)
+Pre2 ==
+       /\ counter = 2
+       /\ out' = [out EXCEPT ![0] = <<[src |-> 0, dst |-> 1, type |-> 1, pr |-> 2, res |-> 0]>>]
+       /\ UNCHANGED <<own,in,trust,relay,n>>
+
+Run2 ==
+    /\ UNCHANGED vars
+
+Post2 == out[0] = <<>>
+
 Pre ==
     /\ Tests[counter].state = 0
-    (* CHANGE: add setup for different tests *)
-    /\ \/ /\ counter = 1
-          /\ out' = [out EXCEPT ![0] = <<[src |-> 0, dst |-> 1, type |-> 1, pr |-> 4, res |-> 0]>>]
-          /\ UNCHANGED <<own,in,trust,relay>>
-       (* \/ /\ counter = 2 *)
-       (*    /\ out' = [out EXCEPT ![0] = <<2>>] *)
-       (*    /\ UNCHANGED <<own,trust, in, relay>> *)
+    (* CHANGE: add precondition of test *)
+    /\ \/ Pre1
+       \/ Pre2
     /\ Tests' = [Tests EXCEPT ![counter].state = 1]
     /\ UNCHANGED <<counter,done>>
 
 Run ==
     /\ Tests[counter].state = 1
     (* CHANGE: Add operators/functions to test *)
-    /\ \/ /\ counter = 1
-          /\ Send(0,[src |-> 0, dst |-> 1, type |-> 1, pr |-> 4, res |-> 0])
-          /\ FALSE
-          (* /\ Rcv(1,[src |-> 0, dst |-> 2, type |-> 1, pr |-> 4, res |-> 0]) *)
-          (* /\ UNCHANGED <<trust,in>> *)
-          (* /\ UNCHANGED vars *)
-       (* \/ /\ counter = 2 *)
-       (*    /\ *)
-       (*    /\ UNCHANGED <<trust, in, relay>> *)
+    /\ \/ Run1
+       \/ Run2
     /\ Tests' = [Tests EXCEPT ![counter].state = 2]
     /\ UNCHANGED <<counter,done>>
 
 (* CHANGE: Add a postcondition *)
-Post1 ==
-    /\ in[1,1] = (<<[src |-> 0, dst |-> 1, type |-> 1, pr |-> 4, res |-> 0],0>> :> 1)
-    /\ in[1,2] = EmptyBag
-    /\ in[0,1] = EmptyBag
-    /\ in[0,2] = EmptyBag
-Post2 == out[0] = <<>>
+
 (* CHANGE: Add postcondition to P *)
 P == <<Post1, Post2>>
 
@@ -74,32 +90,32 @@ Post ==
 Test ==
     \/ /\ done = 0
        /\ \/ Pre
-          \/ /\ ~ ENABLED Pre
-             /\ Tests[counter].state = 0
-             /\ Print("Precondition not enabled, counter:", TRUE)
-             /\ Print(counter, TRUE)
-             /\ done' = 2
-             /\ UNCHANGED <<Tests, counter>>
-             /\ UNCHANGED vars
           \/ Run
-          \/ /\ ~ ENABLED Run
-             /\ Tests[counter].state = 1
-             /\ Print("Run statement not enabled, counter:", TRUE)
-             /\ Print(counter, TRUE)
-             /\ done' = 2
-             /\ UNCHANGED <<Tests, counter>>
-             /\ UNCHANGED vars
           \/ Post
-          \/ /\ ~ ENABLED Post
-             /\ Tests[counter].state = 2
-             /\ Print("Postcondition not enabled, counter:", TRUE)
-             /\ Print(counter, TRUE)
-             /\ done' = 2
-             /\ UNCHANGED <<Tests, counter>>
-             /\ UNCHANGED vars
+          (* \/ /\ ~ ENABLED Pre *)
+          (*    /\ Tests[counter].state = 0 *)
+          (*    /\ Print("Precondition not enabled, counter:", TRUE) *)
+          (*    /\ Print(counter, TRUE) *)
+          (*    /\ done' = 2 *)
+          (*    /\ UNCHANGED <<Tests, counter>> *)
+          (*    /\ UNCHANGED vars *)
+          (* \/ /\ ~ ENABLED Run *)
+          (*    /\ Tests[counter].state = 1 *)
+          (*    /\ Print("Run statement not enabled, counter:", TRUE) *)
+          (*    /\ Print(counter, TRUE) *)
+          (*    /\ done' = 2 *)
+          (*    /\ UNCHANGED <<Tests, counter>> *)
+          (*    /\ UNCHANGED vars *)
+          (* \/ /\ ~ ENABLED Post *)
+          (*    /\ Tests[counter].state = 2 *)
+          (*    /\ Print("Postcondition not enabled, counter:", TRUE) *)
+          (*    /\ Print(counter, TRUE) *)
+          (*    /\ done' = 2 *)
+          (*    /\ UNCHANGED <<Tests, counter>> *)
+          (*    /\ UNCHANGED vars *)
     \/ /\ done = 1
        /\ \A i \in 1..Len(Tests) : /\ Print(i,TRUE)
-                                   /\ Print(Tests[i].status, TRUE)
+                                   (* /\ Print(Tests[i].status, TRUE) *)
        /\ done' = 2
        /\ UNCHANGED <<Tests, counter>>
        /\ UNCHANGED vars
