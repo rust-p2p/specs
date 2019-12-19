@@ -31,7 +31,7 @@ Pre1 ==
 
 Run1 ==
     /\ counter = 1
-    /\ CreateReq(0,[src |-> 0, dst |-> 1, pr |-> 4, res |-> 0])
+    /\ CreateRqst(0,[src |-> 0, dst |-> 1, pr |-> 4, res |-> 0])
    (* /\ UNCHANGED <<trust,in>> *)
       (* /\ UNCHANGED vars *)
 
