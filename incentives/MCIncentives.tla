@@ -12,7 +12,4 @@ Constraint2 ==
 
 Constraint3 ==
     /\ \A p \in Peers : BagCardinality(own[p]) <= 1
-
-Constraint4 ==
-    /\ \A p \in Peers : BagCardinality(n[p]) <= 1
 ====

@@ -7,17 +7,14 @@ EXTENDS Naturals, Sequences, Bags
 a request is forwarded to is irrelevant, no peer can be impersonated (sources are cryptographically signed),
 load is modelled as binary, fixed number of peers guaranteed to be honest *)
 --------------------------------------------------------------------------------
-VARIABLES own, trust, relay, in, out, n
-vars == <<own, trust, relay, in, out, n>>
+VARIABLES own, trust, relay, in, out
+vars == <<own, trust, relay, in, out>>
 
-CONSTANT Peers, Resources, Priority, MaxTrust, LoadBound, OutBound
-(* Peers == 0..1 *)
-(* Resources == 0..0 *)
+CONSTANT Honest, Byzantine, Resources, Priority, MaxTrust, LoadBound, OutBound
 (* Priority == Nat *)
 (* MaxTrust == 1 *)
+Peers == Honest \cup Byzantine
 MaxIn == <<1,1>>
-(* LoadBound == 1 *)
-(* OutBound == 1 *)
 Type == {1,2}
 rqst == 1
 rply == 2
@@ -53,8 +50,6 @@ TypeInv ==
     /\ out \in [Peers -> Seq(Packet)]
     /\ \A p \in Peers : IsABag(own[p])
     /\ \A p \in Peers : \A elt \in BagToSet(own[p]) : elt \in [res : Resources, pr : Priority]
-    /\ \A p \in Peers : IsABag(n[p])
-    /\ \A p \in Peers : \A elt \in BagToSet(n[p]) : elt \in Resources
 
 --------------------------------------------------------------------------------
 
@@ -64,14 +59,13 @@ Init ==
     /\ out = [peer \in Peers |-> << >>]
     /\ trust = [<<p1,p2>> \in Peers \X Peers |-> IF p1 = p2 THEN MaxTrust + 1 ELSE 0]
     /\ own = [peer \in Peers |-> EmptyBag]
-    /\ n = [peer \in Peers |-> EmptyBag]
 
 (* Don't charge trust when load low *)
 (* assumes packet addressed to receiver *)
 RcvRqstLowLoad(rcv,pkt) ==
     /\ BagCardinality(in[rcv,rqst]) < LoadBound
     /\ in' = [in EXCEPT ![rcv,rqst] = Add(in[rcv,rqst],<<pkt,0>>)]
-    /\ UNCHANGED <<own, relay, trust, n>>
+    /\ UNCHANGED <<own, relay, trust>>
 
 (* If enough packets in buffer start charging trust *)
 (* assumes packet addressed to receiver *)
@@ -79,9 +73,8 @@ RcvRqstHighLoad(rcv,pkt) ==
     /\ BagCardinality(in[rcv,rqst]) >= LoadBound
     /\ BagCardinality(in[rcv,rqst]) < MaxIn[rqst]
     /\ in' = [in EXCEPT ![rcv,rqst] = Add(in[rcv,rqst], <<pkt, EffPriority(rcv,pkt)>>)]
-    (* /\ trust' = [trust EXCEPT ![rcv,pkt.src] = @ - EffPriority(rcv,pkt)] *)
     /\ trust' = Debit(rcv,pkt,rqst)
-    /\ UNCHANGED <<own, relay, n>>
+    /\ UNCHANGED <<own, relay>>
 
 (* If max packets in buffer start exchanging them, adapting trust accordingly *)
 (* assumes packet addressed to receiver *)
@@ -91,35 +84,37 @@ RcvRqstLimit(rcv,pkt) ==
     /\ LET min == CHOOSE min \in BagToSet(in[rcv,rqst]) : min[2] < EffPriority(rcv,pkt)
        IN /\ in' = [in EXCEPT ![rcv,rqst] = Swap(@,min,<<pkt,EffPriority(rcv,pkt)>>)]
           /\ trust' = [Debit(rcv,pkt,rqst) EXCEPT ![rcv,min[1].src] = Min(@ + min[2],MaxTrust)]
-    /\ UNCHANGED <<own, relay, n>>
+    /\ UNCHANGED <<own, relay>>
 
 (* If enough packets in buffer start charging trust *)
 (* assumes packet addressed to receiver *)
 RcvRply(rcv,pkt) ==
-    \/ /\ CopiesIn(pkt.res,n[rcv]) # 0
+    LET Eq(x) == x.res = pkt.res
+        NrMatch(B) == BagCardinality(BagOfAll(Eq,B))
+    IN
+    \/ /\ NrMatch(own[rcv]) + NrMatch(relay[rcv]) > NrMatch(in[rcv,rply])
        /\ BagCardinality(in[rcv,rply]) < MaxIn[rply]
-       (* /\ pkt.res \in BagToSet(n[rcv]) *)
        /\ in' = [in EXCEPT ![rcv,rply] = Add(in[rcv,rply], pkt)]
        /\ trust' = Debit(rcv,pkt,rply)
-       /\ n' = [n EXCEPT ![rcv] = Rm(@,pkt.res)]
        /\ UNCHANGED <<own, relay>>
-    \/ /\ CopiesIn(pkt.res,n[rcv]) = 0
-       /\ UNCHANGED <<own, relay, n, trust, in>>
+    \/ /\ NrMatch(own[rcv]) + NrMatch(relay[rcv]) <= NrMatch(in[rcv,rply])
+       /\ UNCHANGED <<own, relay, trust, in>>
 
 (* If max packets in buffer start exchanging them, adapting trust accordingly *)
 (* assumes packet addressed to receiver *)
 RcvRplyLimit(rcv,pkt) ==
-    \/ /\ CopiesIn(pkt.res,n[rcv]) # 0
+    LET Eq(x) == x.res = pkt.res
+        NrMatch(B) == BagCardinality(BagOfAll(Eq,B))
+    IN
+    \/ /\ NrMatch(own[rcv]) + NrMatch(relay[rcv]) > NrMatch(in[rcv,rply])
        /\ BagCardinality(in[rcv,rply]) = MaxIn[rply]
-       /\ pkt.res \in BagToSet(n[rcv])
        /\ \E min \in BagToSet(in[rcv,rply]) : trust[rcv,min.src] < trust[rcv,pkt.src]
        /\ LET min == CHOOSE min \in BagToSet(in[rcv,rply]) : trust[rcv,min.src] < trust[rcv,pkt.src]
           IN /\ in' = [in EXCEPT ![rcv,rply] = Swap(@,min,pkt)]
              /\ trust' = [Debit(rcv,pkt,rply) EXCEPT ![rcv,min.src] = Min(@ + c,MaxTrust)]
-             /\ n' = [n EXCEPT ![rcv] = Swap(@,min.res,pkt.res)]
        /\ UNCHANGED <<own, relay>>
-    \/ /\ CopiesIn(pkt.res,n[rcv]) = 0
-       /\ UNCHANGED <<own, relay, n, trust, in>>
+    \/ /\ NrMatch(own[rcv]) + NrMatch(relay[rcv]) <= NrMatch(in[rcv,rply])
+       /\ UNCHANGED <<own, relay, trust, in>>
 
 (* Send packet from peer p *)
 Send(p,pkt) ==
@@ -141,8 +136,7 @@ Rcv(p,pkt) ==
                 \/ RcvRplyLimit(p,pkt)
     (* TODO discard if not addressed to receiving peer *)
     \/ /\ pkt.dst # p
-       /\ trust' = [trust EXCEPT ![p,pkt.src] = Max(0,@ - c)]
-       /\ UNCHANGED <<n, own, in, relay>>
+       /\ UNCHANGED <<trust, own, in, relay>>
 
 CreateRqst(p,pkt) ==
     /\ pkt \in Request
@@ -150,7 +144,6 @@ CreateRqst(p,pkt) ==
     /\ pkt.dst # p
     /\ out' = [out EXCEPT ![p] = Append(out[p],pkt)]
     /\ own' = [own EXCEPT ![p] = Add(@,[res |-> pkt.res, pr |-> pkt.pr])]
-    /\ n' = [n EXCEPT ![p] = Add(@,pkt.res)]
     /\ UNCHANGED <<in, trust, relay>>
 
 (* relay a request *)
@@ -161,7 +154,6 @@ Relay(p,nxt) ==
            pkt == max[1]
        IN /\ relay' = [relay EXCEPT ![p] = Add(@,[pkt EXCEPT !.dst = p, !.pr = max[2]])]
           /\ out' = [out EXCEPT ![p] = Append(@,[src |-> p, dst |-> nxt, pr |-> 0, res |-> pkt.res])]
-          /\ n' = [n EXCEPT ![p] = Add(@,max[1].res)]
           /\ in' = [in EXCEPT ![p,rqst] = Rm(@,pkt)]
           /\ UNCHANGED <<own, trust>>
 
@@ -174,9 +166,8 @@ Rply(p) ==
            pkt == max[1]
            answer == [src |-> p, dst |-> pkt.src, res |-> pkt.res]
        IN /\ out' = [out EXCEPT ![p] = Append(@,answer)]
-          (* /\ Print(pkt,TRUE) *)
           /\ in' = [in EXCEPT ![p,rqst] = Rm(@,max)]
-          /\ UNCHANGED <<own, trust, relay, n>>
+          /\ UNCHANGED <<own, trust, relay>>
 
 PrcRqst(p) ==
     \/ Rply(p)
@@ -185,7 +176,7 @@ PrcRqst(p) ==
 
 MatchesWithIn(p,bag) ==
     {r \in BagToSet(bag) :
-    \E i \in BagToSet(in[p,rply]) : (* /\ i.src = r.src *) /\ i.res = r.res}
+    \E i \in BagToSet(in[p,rply]) : /\ i.res = r.res}
 
 ConsumeRply(p) ==
     /\ MatchesWithIn(p,own[p]) # {}
@@ -195,7 +186,7 @@ ConsumeRply(p) ==
        IN /\ trust' = [trust EXCEPT ![p,pkt.src] = Min(@ + c + max.pr,MaxTrust)]
           /\ in' = [in EXCEPT ![p,rply] = Rm(@,pkt)]
           /\ own' = [own EXCEPT ![p] = Rm(@,max)]
-          /\ UNCHANGED <<out, relay, n>>
+          /\ UNCHANGED <<out, relay>>
 
 FrwdRply(p) ==
     (* IN not empty, pick response to packet with maximum priority *)
@@ -209,7 +200,7 @@ FrwdRply(p) ==
           /\ in' = [in EXCEPT ![p,rply] = Rm(@,max)]
           /\ out' = [out EXCEPT ![p] = Append(@,frwd)]
           /\ trust' = [trust EXCEPT ![p,max.src] = Min(@ + c,MaxTrust)]
-    /\ UNCHANGED <<own,n>>
+    /\ UNCHANGED own
 
 PrcRply(p) ==
     \/ ConsumeRply(p)
@@ -217,14 +208,18 @@ PrcRply(p) ==
 (*     \/ /\ *)
 (*     /\ in[p,rply] # EmptyBag *)
 
+(* Byzantine behaviour *)
+(* Byz(b) == *)
+
 Next ==
-    \/ \E p \in Peers : PrcRqst(p)
-    \/ \E p \in Peers : PrcRply(p)
-    \/ \E p \in Peers : \E pkt \in Packet : CreateRqst(p,pkt)
-    \/ \E src \in Peers :
+    \/ \E p \in Honest : PrcRqst(p)
+    \/ \E p \in Honest : PrcRply(p)
+    \/ \E p \in Honest : \E pkt \in Packet : CreateRqst(p,pkt)
+    \/ \E src \in Honest :
        \E dst \in Peers \ {src} :
        \E pkt \in Packet : /\ Send(src,pkt)
                            /\ Rcv(dst,pkt)
+    (* \/ \E b \in Byzantine : Byz(b) *)
     (* \/ /\ Print(out,TRUE) *)
     (*    /\ UNCHANGED vars *)
 
