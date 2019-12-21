@@ -10,7 +10,7 @@ load is modelled as binary, fixed number of peers guaranteed to be honest *)
 VARIABLES own, trust, relay, in, out
 vars == <<own, trust, relay, in, out>>
 
-CONSTANT Honest, Byzantine, Resources, Priority, MaxTrust, LoadBound, OutBound
+CONSTANT P, Honest, Byzantine, Resources, Priority, MaxTrust, LoadBound, OutBound
 (* Priority == Nat *)
 (* MaxTrust == 1 *)
 Peers == Honest \cup Byzantine
@@ -35,30 +35,33 @@ EffPriority(p,pkt) == Min(pkt.pr, trust[p,pkt.src])
 Debit(p,pkt,type) == [trust EXCEPT ![p,pkt.src] = Max(0, @ - IF type = rqst THEN pkt.pr ELSE c)]
 Credit(p,pkt,type) == [trust EXCEPT ![p,pkt.src] = Min(@ + pkt.pr, MaxTrust) ]
 
+(* without loss of generality it suffices to check invariants for one honest peer *)
+(* P == CHOOSE p \in Honest *)
+
 TypeInv ==
-    /\ \A <<p1,p2>> \in Peers \X Peers : /\ p1 # p2 => trust[p1,p2] \in 0..MaxTrust
-                                         /\ p1 = p2 => trust[p1,p2] = MaxTrust + 1
-    /\ \A p \in Peers : IsABag(relay[p])
-    /\ \A p \in Peers : \A elt \in BagToSet(relay[p]) : elt \in Request
-    /\ \A <<p,t>> \in Peers \X Type : IsABag(in[p,t])
-    /\ \A p \in Peers : \A elt \in BagToSet(in[p,rqst]) :
+    /\ \A p \in Peers : /\ P # p => trust[P,p] \in 0..MaxTrust
+                        /\ P = p => trust[P,p] = MaxTrust + 1
+    /\ IsABag(relay[P])
+    /\ \A elt \in BagToSet(relay[P]) : elt \in Request
+    /\ \A t \in Type : IsABag(in[P,t])
+    /\ \A elt \in BagToSet(in[P,rqst]) :
                                                 (* elt \in Packet \X 0..MaxTrust ? *)
                                                             /\ elt[1] \in Request
                                                             /\ elt[2] \in 0..MaxTrust
                                                             /\ Len(elt) = 2
-    /\ \A p \in Peers : \A elt \in BagToSet(in[p,rply]) : elt \in Reply
+    /\ \A elt \in BagToSet(in[P,rply]) : elt \in Reply
     /\ out \in [Peers -> Seq(Packet)]
-    /\ \A p \in Peers : IsABag(own[p])
-    /\ \A p \in Peers : \A elt \in BagToSet(own[p]) : elt \in [res : Resources, pr : Priority]
+    /\ IsABag(own[P])
+    /\ \A elt \in BagToSet(own[P]) : elt \in [res : Resources, pr : Priority]
 
 --------------------------------------------------------------------------------
 
 Init ==
-    /\ relay = [peer \in Peers |-> EmptyBag]
-    /\ in = [<<peer, type>> \in Peers \X Type |-> EmptyBag]
+    /\ relay = [peer \in Honest |-> EmptyBag]
+    /\ in = [<<peer, type>> \in Honest \X Type |-> EmptyBag]
     /\ out = [peer \in Peers |-> << >>]
-    /\ trust = [<<p1,p2>> \in Peers \X Peers |-> IF p1 = p2 THEN MaxTrust + 1 ELSE 0]
-    /\ own = [peer \in Peers |-> EmptyBag]
+    /\ trust = [<<p1,p2>> \in Honest \X Peers |-> IF p1 = p2 THEN MaxTrust + 1 ELSE 0]
+    /\ own = [peer \in Honest |-> EmptyBag]
 
 (* Don't charge trust when load low *)
 (* assumes packet addressed to receiver *)
@@ -205,23 +208,42 @@ FrwdRply(p) ==
 PrcRply(p) ==
     \/ ConsumeRply(p)
     \/ FrwdRply(p)
-(*     \/ /\ *)
-(*     /\ in[p,rply] # EmptyBag *)
 
-(* Byzantine behaviour *)
-(* Byz(b) == *)
+Drop(b) ==
+    /\ Len(out[b]) # 0
+    /\ out' = [out EXCEPT ![b] = Tail(@)]
+    /\ UNCHANGED <<in, trust, relay, own>>
+
+CreateByz(b) ==
+    /\ \E pkt \in Packet : /\ pkt.src = b
+                           /\ out' = [out EXCEPT ![b] = Append(@,pkt)]
+                           /\ UNCHANGED <<in, relay, own, trust>>
 
 Next ==
     \/ \E p \in Honest : PrcRqst(p)
     \/ \E p \in Honest : PrcRply(p)
     \/ \E p \in Honest : \E pkt \in Packet : CreateRqst(p,pkt)
+    (* send from honest to honest peer *)
     \/ \E src \in Honest :
-       \E dst \in Peers \ {src} :
+       \E dst \in Honest \ {src} :
        \E pkt \in Packet : /\ Send(src,pkt)
                            /\ Rcv(dst,pkt)
-    (* \/ \E b \in Byzantine : Byz(b) *)
-    (* \/ /\ Print(out,TRUE) *)
-    (*    /\ UNCHANGED vars *)
+    (* send from honest to byzantine peer *)
+    \/ \E src \in Honest :
+       \E dst \in Byzantine : /\ out[src] # << >>
+                              /\ out' = [out EXCEPT ![src] = Tail(out[src]),
+                                                    ![dst] = Append(@,Head(out[src]))]
+                              /\ UNCHANGED <<trust,in,own, relay>>
+    (* behaviour of byzantine peer *)
+    (* create arbitrary packet, except peer cannot fake others identities *)
+    \/ \E b \in Byzantine : CreateByz(b)
+    (* drop packet from sending queue *)
+    \/ \E b \in Byzantine : Drop(b)
+    (* send a packet *)
+    \/ \E b \in Byzantine :
+       \E dst \in Peers :
+       \E pkt \in Packet : /\ Send(b,pkt)
+                           /\ Rcv(dst,pkt)
 
 Fairness ==
     \A p \in Peers :
@@ -235,11 +257,12 @@ Fairness ==
     /\ WF_vars(ConsumeRply(p))
 
 Spec == Init /\ [][Next]_vars /\ Fairness
-RcvEnabled == \A p \in Peers : \E pkt \in Reply : ENABLED Rcv(p,pkt)
-SendRcvEnabled == \A p \in Peers : Len(out[p]) # 0 => \E pkt \in Packet : \E p2 \in Peers : ENABLED Send(p,pkt) /\ ENABLED Rcv(p2,pkt)
-CreateEnabled == \A p \in Peers : \A pkt \in Request : pkt.src = p /\ pkt.dst # p => ENABLED CreateRqst(p,pkt)
-(* Fail == \A p \in Peers : \A p2 \in Peers \ {p} : \E pkt \in Reply : /\ ENABLED Send(p,pkt) *)
-(*                                                                     /\ ENABLED Rcv(p2,pkt) *)
+RcvEnabled == \E pkt \in Reply : ENABLED Rcv(P,pkt)
+SendRcvEnabled == Len(out[P]) # 0 => \E pkt \in Packet :
+                                     \E p \in Peers :  /\ ENABLED Send(P,pkt)
+                                                       /\ ENABLED Rcv(p,pkt)
+CreateEnabled == \A pkt \in Request : (/\ pkt.src = P
+                                       /\ pkt.dst # P) => ENABLED CreateRqst(P,pkt)
 ================================================================================
 THEOREM Spec => []TypeInv
 ================================================================================
