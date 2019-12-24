@@ -45,7 +45,8 @@ if args.states:
 if args.dot:
     dump += '-dump dot,colorize,actionlabels ' + wdir + '/' + args.module + '.states '
 
-cmd = 'tlc ' + coverage + dump + args.module + '.tla'
+cmd = 'tlc ' + '-workers 2 ' + coverage + dump + args.module + '.tla'
+# cmd = 'tlc ' + coverage + dump + args.module + '.tla'
 
 os.environ['TLA_JAVA_OPTS'] = tla_java_opts
 os.chdir(wdir)
