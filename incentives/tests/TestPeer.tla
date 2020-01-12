@@ -63,7 +63,7 @@ Run1 ==
     /\ counter = 1
     (* /\ Print(BagCardinality(Peer(0)!PNeeds),TRUE) *)
     (* /\ Print(BagCardinality(track[0]),TRUE) *)
-    /\ Print(unneeded,TRUE)
+    (* /\ Print(unneeded,TRUE) *)
     (* /\ Print(maxusable,TRUE) *)
     (* /\ Print(rplys_in_buf,TRUE) *)
     (* /\ Print(Filter(RplyInBuf,([res |-> 2,lasthop |-> 0] :> 1)),TRUE) *)
@@ -74,11 +74,53 @@ Run1 ==
 Post1 ==
     /\ TRUE
 
+(* Test2 *)
+Pre2 ==
+    /\ counter = 2
+    /\ trust' = ( <<0, 0>> :> 0 @@
+                  <<0, 1>> :> 0 @@
+                  <<0, 2>> :> 0 @@
+                  <<1, 0>> :> 0 @@
+                  <<1, 1>> :> 0 @@
+                  <<1, 2>> :> 0 @@
+                  <<2, 0>> :> 0 @@
+                  <<2, 1>> :> 0 @@
+                  <<2, 2>> :> 0 )
+    /\ buf' = (0 :> << >> @@ 1 :> << >> @@ 2 :> ([res |-> 1, lasthop |-> 1] :> 1))
+    /\ chan' = ( <<0, 0>> :> <<>> @@
+                 <<0, 1>> :> <<>> @@
+                 <<0, 2>> :> <<>> @@
+                 <<1, 0>> :> <<>> @@
+                 <<1, 1>> :> <<>> @@
+                 <<1, 2>> :> <<>> @@
+                 <<2, 0>> :> <<>> @@
+                 <<2, 1>> :> <<[src |-> 2, pr |-> 0, res |-> 0]>> @@
+                 <<2, 2>> :> <<>> )
+    /\ track' = ( 0 :> ([res |-> 1, lasthop |-> 2, val |-> 0, nxthop |-> 0] :> 1) @@
+                  1 :> << >> @@
+                  2 :> ( [res |-> 0, lasthop |-> 1, val |-> 0, nxthop |-> 2] :> 1 @@
+                  [res |-> 1, lasthop |-> 1, val |-> 0, nxthop |-> 0] :> 1 ) )
+
+Run2 ==
+    /\ counter = 2
+    (* /\ Print(BagCardinality(Peer(0)!PNeeds),TRUE) *)
+    (* /\ Print(BagCardinality(track[0]),TRUE) *)
+    (* /\ Print(unneeded,TRUE) *)
+    /\ Print(maxusable,TRUE)
+    (* /\ Print(rplys_in_buf,TRUE) *)
+    (* /\ Print(Filter(RplyInBuf,([res |-> 2,lasthop |-> 0] :> 1)),TRUE) *)
+    (* /\ Print(Filter(RplyInBuf,([res |-> 2, lasthop |-> 1] :> 3)),TRUE) *)
+    (* /\ Print(buf[0],TRUE) *)
+    /\ UNCHANGED vars
+
+Post2 ==
+    /\ TRUE
+
 Pre ==
     /\ state = 0
     (* CHANGE: add setup for different tests *)
     /\ \/ Pre1
-       (* \/ Pre2 *)
+       \/ Pre2
     /\ state' = 1
     /\ UNCHANGED <<Tests, counter,done>>
 
@@ -86,12 +128,12 @@ Run ==
     /\ state = 1
     (* CHANGE: Add operators/functions to test *)
     /\ \/ Run1
-       (* \/ Run2 *)
+       \/ Run2
     /\ state' = 2
     /\ UNCHANGED <<Tests, counter,done>>
 
 (* CHANGE: Add postcondition to P *)
-PList == <<Post1>>
+PList == <<Post1, Post2>>
 
 Post ==
     /\ state = 2
