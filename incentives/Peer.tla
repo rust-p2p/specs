@@ -130,6 +130,8 @@ TypeInv ==
        (+) local
        (+) nonlocal
        (+) discard = buf[P]
+    /\ BagToSet(rplys_in_buf) \subseteq [res : Resource, lasthop : Peers]
+    /\ BagToSet(rqsts_in_buf) \subseteq [res : Resource, lasthop : Peers, val : Value]
     (* NOTE unneeded not always empty *)
     (* /\ unneeded = EmptyBag *)
     (* NOTE maxusable not always empty *)
@@ -218,6 +220,7 @@ FrwdRply(rply_in_buf) ==
     (* remove all the processed plus discarded packets from the buffer *)
     /\ \E entry \in BagToSet(track[P]) :
         /\ entry.lasthop = rply_in_buf.lasthop
+        /\ entry.res = rply_in_buf.res
         /\ trust' = [trust EXCEPT ![P,rply_in_buf.lasthop] = Min(TrustBound,@ + c + entry.val)]
         /\ track' = [track EXCEPT ![P] = Rm(@,entry)]
         /\ chan' = [chan EXCEPT ![P,entry.nxthop] = Append(@,[res |-> rply_in_buf.res])]
@@ -239,7 +242,7 @@ Consume(rply_in_buf) ==
            (* adding a constant c ensures that peers have incentive to reply
               to a request with zero priority if they are idle, without this,
               rational peers would discard requests with zero priority *)
-           /\ trust' = [trust EXCEPT ![P,entry.lasthop] = Min(TrustBound,@ + c + entry.val)]
+           /\ trust' = [trust EXCEPT ![P,entry.lasthop] = Min(@ + c + entry.val,TrustBound)]
            /\ track' = [track EXCEPT ![P] = Rm(@,entry)]
        /\ buf' = [buf EXCEPT ![P] = Rm(@,rply_in_buf)]
        /\ UNCHANGED chan
@@ -252,7 +255,7 @@ Consume(rply_in_buf) ==
           \E stolen \in BagToSet(track[P]) :
            /\ track' = [track EXCEPT ![P] = Add(Rm(Rm(@,stolen),own),
                                                 [own EXCEPT !.nxthop = stolen.nxthop])]
-          /\ trust' = [trust EXCEPT ![P,rply_in_buf.lasthop] = Max(@ + c + stolen.val,TrustBound)]
+           /\ trust' = [trust EXCEPT ![P,rply_in_buf.lasthop] = Min(@ + c + stolen.val,TrustBound)]
        /\ buf' = [buf EXCEPT ![P] = Rm(@,rply_in_buf)]
        /\ UNCHANGED chan
 
@@ -265,8 +268,9 @@ Next ==
    LET e == CHOOSE elt \in Peers \X Peers : elt[1] # elt[2]
    IN
    (* for printing debug statements *)
-   (* /\ Print(buf[0](\* [e[1](\\* ,e[2] *\\)] *\),TRUE) *)
-   /\ \/ \E rqst \in Request : CreateRqst(rqst)
+   (* /\ Print(PNeeds(\* [e[1](\\* ,e[2] *\\)] *\),TRUE) *)
+   /\ \/ FALSE
+      \/ \E rqst \in Request : CreateRqst(rqst)
       \/ \E n \in N : Rcv(n)
       (* a subset of the packets will be blocked due to IO constraints or TrackBound,
          the complement of which are the free packets *)
@@ -274,12 +278,11 @@ Next ==
                      (*  frwd : SubBag(frwd), *)
                      (*  local : SubBag(local), *)
                      (*  nonlocal : SubBag(nonlocal)] : *) (* /\ TRUE *)
-                                                     (* /\ UNCHANGED vars *)
-         \/ \E pkt \in BagToSet((* free. *)maxusable) : Consume(pkt)
-         \/ \E pkt \in BagToSet((* free. *)frwd) : FrwdRply(pkt)
-         \/ \E pkt \in BagToSet((* free. *)local) : Rply(pkt)
-         \/ \E pkt \in BagToSet((* free. *)nonlocal) : Relay(pkt)
-      (* \/ \E pkt \in BagToSet(discard) : Drop(pkt) *)
+          \/ \E pkt \in BagToSet((* free. *)maxusable) : Consume(pkt)
+          \/ \E pkt \in BagToSet((* free. *)frwd) : FrwdRply(pkt)
+          \/ \E pkt \in BagToSet((* free. *)local) : Rply(pkt)
+          \/ \E pkt \in BagToSet((* free. *)nonlocal) : Relay(pkt)
+          (* \/ \E pkt \in BagToSet(discard) : Drop(pkt) *)
 
 (* there are no additional conditions on packets beyond the
    splitting
@@ -291,8 +294,11 @@ EnableRplyRelayFrwd ==
     /\ \A pkt \in BagToSet(nonlocal) : ENABLED Relay(pkt)
 
 Fairness ==
-(*     (\* /\ \A pkts \in SubBag(buf) : WF_vars(Process(pkts)) *\) *)
     /\ \A n \in N : WF_vars(Rcv(n))
+    /\ \E pkt \in BagToSet(maxusable) : WF_vars(Consume(pkt))
+    /\ \E pkt \in BagToSet(frwd) : WF_vars(FrwdRply(pkt))
+    /\ \E pkt \in BagToSet(local) : WF_vars(Rply(pkt))
+    /\ \E pkt \in BagToSet(nonlocal) : WF_vars(Relay(pkt))
 
 Spec == Init /\ [][Next]_vars /\ Fairness
 =======================================================
