@@ -20,21 +20,88 @@ Peer(p) == INSTANCE Peer WITH P <- p
 BufType == [lasthop : Peers, val : Value, res : Resource] \cup [lasthop : Peers, res : Resource]
 
 Init ==
-    /\ buf = [p \in Peers |-> EmptyBag]
-    /\ track = [p \in Peers |-> EmptyBag]
-    /\ trust = [e \in Peers \X Peers |-> 0]
-    /\ chan = [e \in Peers \X Peers |-> << >>]
+    \/ /\ buf = [p \in Peers |-> EmptyBag]
+       /\ track = [p \in Peers |-> EmptyBag]
+       /\ trust = [e \in Peers \X Peers |-> TrustBound]
+       /\ chan = [e \in Peers \X Peers |-> << >>]
+    (* different initial conditions for more complete coverage report *)
+    (* 2nd initial condition *)
+    \/ /\ trust = ( <<0, 0>> :> 0 @@
+                    <<0, 1>> :> 1 @@
+                    <<0, 2>> :> 1 @@
+                    <<1, 0>> :> 0 @@
+                    <<1, 1>> :> 0 @@
+                    <<1, 2>> :> 0 @@
+                    <<2, 0>> :> 0 @@
+                    <<2, 1>> :> 0 @@
+                    <<2, 2>> :> 0 )
+       /\ buf = (0 :> << >> @@ 1 :> << >> @@ 2 :> ([res |-> 1, lasthop |-> 1] :> 1))
+       /\ chan = ( <<0, 0>> :> <<>> @@
+                   <<0, 1>> :> <<>> @@
+                   <<0, 2>> :> <<>> @@
+                   <<1, 0>> :> <<>> @@
+                   <<1, 1>> :> <<>> @@
+                   <<1, 2>> :> <<>> @@
+                   <<2, 0>> :> <<>> @@
+                   <<2, 1>> :> <<[src |-> 2, pr |-> 0, res |-> 0]>> @@
+                   <<2, 2>> :> <<>> )
+       /\ track = ( 0 :> ([res |-> 1, lasthop |-> 2, val |-> 0, nxthop |-> 0] :> 1) @@
+                    1 :> << >> @@
+                    2 :> ( [res |-> 0, lasthop |-> 1, val |-> 0, nxthop |-> 2] :> 1 @@
+                           [res |-> 1, lasthop |-> 1, val |-> 0, nxthop |-> 0] :> 1 ) )
+    (* 3nd initial condition *)
+    \/ /\ trust = ( <<0, 0>> :> 0 @@
+                    <<0, 1>> :> 1 @@
+                    <<0, 2>> :> 1 @@
+                    <<1, 0>> :> 0 @@
+                    <<1, 1>> :> 0 @@
+                    <<1, 2>> :> 0 @@
+                    <<2, 0>> :> 0 @@
+                    <<2, 1>> :> 0 @@
+                    <<2, 2>> :> 0 )
+       /\ buf = (0 :> ([res |-> 1, lasthop |-> 1] :> 1) @@ 1 :> << >> @@ 2 :> << >>)
+       /\ chan = ( <<0, 0>> :> <<>> @@
+                   <<0, 1>> :> <<>> @@
+                   <<0, 2>> :> <<>> @@
+                   <<1, 0>> :> <<>> @@
+                   <<1, 1>> :> <<>> @@
+                   <<1, 2>> :> <<>> @@
+                   <<2, 0>> :> <<>> @@
+                   <<2, 1>> :> <<[src |-> 2, pr |-> 0, res |-> 0]>> @@
+                   <<2, 2>> :> <<>> )
+       /\ track = ( 0 :> ([res |-> 1, lasthop |-> 2, val |-> 0, nxthop |-> 0] :> 1) @@
+                    1 :> << >> @@
+                    2 :> ( [res |-> 0, lasthop |-> 1, val |-> 0, nxthop |-> 2] :> 1 @@
+                           [res |-> 1, lasthop |-> 1, val |-> 0, nxthop |-> 0] :> 1 ) )
+    (* 4nd initial condition *)
+    \/ /\ trust = [e \in Peers \X Peers |-> 0]
+       /\ buf = (0 :> ([res |-> 0, lasthop |-> 1] :> 1) @@ 1 :> <<>> @@ 2 :> <<>>)
+       /\ chan = [e \in Peers \X Peers |-> << >>]
+       /\ track = ( 0 :> ( [res |-> 1, lasthop |-> 2, val |-> 0, nxthop |-> 0] :> 1 @@
+                           [res |-> 1, lasthop |-> 1, val |-> 1, nxthop |-> 2] :> 1 ) @@
+                    1 :> <<>> @@
+                    2 :>
+                    ( [res |-> 0, lasthop |-> 1, val |-> 0, nxthop |-> 2] :> 1 @@
+                    [res |-> 1, lasthop |-> 1, val |-> 0, nxthop |-> 0] :> 1 ) )
+    (* 5nd initial condition *)
+    \/ /\ trust = [e \in Peers \X Peers |-> 0]
+       /\ buf = (0 :> ([res |-> 0, lasthop |-> 1, val |-> 0] :> 1) @@ 1 :> <<>> @@ 2 :> <<>>)
+       /\ chan = [e \in Peers \X Peers |-> << >>]
+       /\ track = ( 0 :> <<>> @@
+                    1 :> <<>> @@
+                    2 :> <<>>)
 
 TypeInv ==
     /\ Peer(0)!TypeInv
 
 Next ==
-    \/ \E p \in Peers : Peer(p)!Next
-    (* \/ *)
+    \/ /\ TRUE
+       /\ \E p \in Peers : Peer(p)!Next
 
-(* as long as buf is not empty, exactly one of Rply, Relay and Frwd actions is
-   enabled at a time *)
-EnableRplyRelayFrwd == []( Peer(0)!EnableRplyRelayFrwd )
+(* as long as buf is not empty, processing of any packet should be possible,
+   this means no corner cases are unhandled *)
+AllPktsEnabled == []( Peer(0)!AllPktsEnabled )
+(* this constrains the model checking space *)
 ChanSize == \A p1 \in Peers : \A p2 \in Peers : Len(chan[p1,p2]) <= 1
 (* these properties should all fail individually during model checking *)
 Never == [](
