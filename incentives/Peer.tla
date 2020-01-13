@@ -1,15 +1,16 @@
 ---- MODULE Peer ---------------------------------------------------------------
 EXTENDS Naturals, Sequences, Bags
 (* Documentation *)
-(* This specification deals with the handling of packets according to an incentive
-   scheme, with the goal of providing Byzantine fault tolerance and DoS resistance
+(* This specification deals WITH request-response protocols, IN which intermediary
+   peers can verify that the response corresponds to the request, WITH the goal of
+   providing Byzantine fault tolerance and DoS resistance
    in an unpermissioned p2p network. The idea is originally due to a paper of Christian
    Grothoff *)
 
 (* Implicit assumptions include reliable transport layer with zero delay, the neighbour
    a request is forwarded to is irrelevant, no peer can be impersonated (sources are
-   cryptographically signed), load is modelled as binary, fixed number of peers guaranteed
-   to be honest. *)
+   cryptographically signed), load is modelled as binary, fixed number of peers
+   guaranteed to be honest. *)
 --------------------------------------------------------------------------------
 VARIABLES buf, chan, track, trust
 vars == <<buf, chan, track, trust>>
@@ -17,6 +18,7 @@ vars == <<buf, chan, track, trust>>
 CONSTANT Priority, P, Honest, Byzantine, Resource, TrustBound, LoadBound, TrackBound, (* Neighbour(_,_), *) BufBound(* , Local *)
 
 Peers == Honest \cup Byzantine
+(* could be replaced by a different neighbourship relation *)
 Neighbour(p1,p2) == TRUE
 (* Local == [e \in Peers |-> {0}] *)
 Local == (0 :> {0} @@ 1 :> {1} @@ 2 :> {2})
@@ -217,14 +219,26 @@ Relay(rqst_in_buf) ==
     /\ trust' = [trust EXCEPT ![P,rqst_in_buf.lasthop] = Max(0,@ - rqst_in_buf.val)]
 
 FrwdRply(rply_in_buf) ==
-    (* remove all the processed plus discarded packets from the buffer *)
-    /\ \E entry \in BagToSet(track[P]) :
-        /\ entry.lasthop = rply_in_buf.lasthop
-        /\ entry.res = rply_in_buf.res
-        /\ trust' = [trust EXCEPT ![P,rply_in_buf.lasthop] = Min(TrustBound,@ + c + entry.val)]
-        /\ track' = [track EXCEPT ![P] = Rm(@,entry)]
-        /\ chan' = [chan EXCEPT ![P,entry.nxthop] = Append(@,[res |-> rply_in_buf.res])]
-    /\ buf' = [buf EXCEPT ![P] = Rm(@,rply_in_buf)]
+    LET
+    Match(entry) == entry.res = rply_in_buf.res
+    match == Filter(Match,track[P])
+    IN
+    \/ /\ \E entry \in BagToSet(track[P]) :
+           /\ entry.lasthop = rply_in_buf.lasthop
+           /\ entry.res = rply_in_buf.res
+           /\ trust' = [trust EXCEPT ![P,rply_in_buf.lasthop] = Min(TrustBound,@ + c + entry.val)]
+           /\ track' = [track EXCEPT ![P] = Rm(@,entry)]
+           /\ chan' = [chan EXCEPT ![P,entry.nxthop] = Append(@,[res |-> rply_in_buf.res])]
+       /\ buf' = [buf EXCEPT ![P] = Rm(@,rply_in_buf)]
+    \/ /\ ~ \E exact \in BagToSet(track[P]) :
+           /\ exact.lasthop = rply_in_buf.lasthop
+           /\ exact.res = rply_in_buf.res
+       /\ \E entry \in BagToSet(track[P]) :
+           /\ entry.res = rply_in_buf.res
+           /\ trust' = [trust EXCEPT ![P,rply_in_buf.lasthop] = Min(TrustBound,@ + c + entry.val)]
+           /\ track' = [track EXCEPT ![P] = Rm(@,entry)]
+           /\ chan' = [chan EXCEPT ![P,entry.nxthop] = Append(@,[res |-> rply_in_buf.res])]
+       /\ buf' = [buf EXCEPT ![P] = Rm(@,rply_in_buf)]
 
 CreateRqst(rqst) ==
     (* valid requests created by P must be for resources not locally available
@@ -235,34 +249,52 @@ CreateRqst(rqst) ==
     /\ UNCHANGED <<buf, track, trust>>
 
 Consume(rply_in_buf) ==
-    (* entry was addressed to P *)
-    \/ /\ \E entry \in BagToSet(track[P]) :
-           /\ entry.nxthop = P
-           /\ entry.lasthop = rply_in_buf.lasthop
-           (* adding a constant c ensures that peers have incentive to reply
-              to a request with zero priority if they are idle, without this,
-              rational peers would discard requests with zero priority *)
-           /\ trust' = [trust EXCEPT ![P,entry.lasthop] = Min(@ + c + entry.val,TrustBound)]
-           /\ track' = [track EXCEPT ![P] = Rm(@,entry)]
-       /\ buf' = [buf EXCEPT ![P] = Rm(@,rply_in_buf)]
-       /\ UNCHANGED chan
-    (* entry wasn't adressed to P, self-interest dictates P 'steals' the answer *)
-    \/ /\ ~ \E entry \in BagToSet(track[P]) :
-           /\ entry.nxthop = P
-           /\ entry.lasthop = rply_in_buf.lasthop
-       (* adapt tracked packets, swapping *)
-       /\ \E own \in BagToSet(track[P]) :
-          \E stolen \in BagToSet(track[P]) :
-           /\ track' = [track EXCEPT ![P] = Add(Rm(Rm(@,stolen),own),
-                                                [own EXCEPT !.nxthop = stolen.nxthop])]
-           /\ trust' = [trust EXCEPT ![P,rply_in_buf.lasthop] = Min(@ + c + stolen.val,TrustBound)]
-       /\ buf' = [buf EXCEPT ![P] = Rm(@,rply_in_buf)]
-       /\ UNCHANGED chan
+    LET
+    Track == BagToSet(track[P])
+    (* Match(entry) == entry.res = rply_in_buf.res *)
+    (* all the tracked packets that match the resource *)
+    matches == Filter(LAMBDA e : e.res = rply_in_buf.res,track[P])
+    Matches == BagToSet(matches)
+    (* all the tracked packets that match the resource and are expected to come
+       from the peer that sent the reply *)
+    knownlast == Filter(LAMBDA e : e.lasthop = rply_in_buf.lasthop,matches)
+    Knownlast == BagToSet(knownlast)
+    knownlast_to_P == Filter(LAMBDA e : e.nxthop = P,knownlast)
+    Knownlast_To_P == BagToSet(knownlast_to_P)
+    IN
+    /\ IF knownlast = EmptyBag
+       THEN \E entry \in Matches : /\ entry.nxthop = P
+                                   /\ track' = [track EXCEPT ![P] = Rm(@,entry)]
+                                   /\ trust' = [trust EXCEPT ![P,rply_in_buf.lasthop] = Min(@ + c + entry.val,TrustBound)]
+       ELSE IF knownlast_to_P # EmptyBag
+            THEN \E entry \in Knownlast_To_P :
+                  /\ track' = [track EXCEPT ![P] = Rm(@,entry)]
+                  /\ trust' = [trust EXCEPT ![P,rply_in_buf.lasthop] = Min(@ + c + entry.val,TrustBound)]
+            ELSE \E steal \in Knownlast :
+                 \E own \in Matches :
+                  /\ own.nxthop = P
+                  /\ track' = [track EXCEPT ![P] = Add(Rm(Rm(@,steal),own),[steal EXCEPT !.lasthop = own.lasthop, !.val = own.val])]
+                  /\ trust' = [trust EXCEPT ![P,rply_in_buf.lasthop] = Min(@ + c + steal.val,TrustBound)]
+    /\ buf' = [buf EXCEPT ![P] = Rm(@,rply_in_buf)]
+    /\ UNCHANGED chan
 
 
 Drop(rply_in_buf) ==
     /\ buf' = [buf EXCEPT ![P] = Rm(@,rply_in_buf)]
     /\ UNCHANGED <<chan, track, trust>>
+
+Process(pkt) ==
+    IF pkt \in [lasthop : N, res : Resource, val : Value]
+    THEN IF pkt.res \in Local[P]
+         THEN Rply(pkt)
+         ELSE Relay(pkt)
+    ELSE IF pkt \in [lasthop : N, res : Resource]
+         THEN IF BagIn(pkt.res,PNeeds)
+              THEN Consume(pkt)
+              ELSE IF ~ BagIn(pkt.res,BagOfAll(Res,track[P]))
+                   THEN Drop(pkt)
+                   ELSE FrwdRply(pkt)
+         ELSE Drop(pkt)
 
 Next ==
    LET e == CHOOSE elt \in Peers \X Peers : elt[1] # elt[2]
@@ -274,31 +306,22 @@ Next ==
       \/ \E n \in N : Rcv(n)
       (* a subset of the packets will be blocked due to IO constraints or TrackBound,
          the complement of which are the free packets *)
-      \/ \E free \in {0} :(* [maxusable : SubBag(maxusable), *)
-                     (*  frwd : SubBag(frwd), *)
-                     (*  local : SubBag(local), *)
-                     (*  nonlocal : SubBag(nonlocal)] : *) (* /\ TRUE *)
-          \/ \E pkt \in BagToSet((* free. *)maxusable) : Consume(pkt)
-          \/ \E pkt \in BagToSet((* free. *)frwd) : FrwdRply(pkt)
-          \/ \E pkt \in BagToSet((* free. *)local) : Rply(pkt)
-          \/ \E pkt \in BagToSet((* free. *)nonlocal) : Relay(pkt)
-          (* \/ \E pkt \in BagToSet(discard) : Drop(pkt) *)
+         \/ \E pkt \in BagToSet(buf[P]) :
+             Process(pkt)
 
-(* there are no additional conditions on packets beyond the
-   splitting
-   buf = maxusable (+) frwd (+) local (+) nonlocal *)
-EnableRplyRelayFrwd ==
-    /\ \A pkt \in BagToSet(maxusable) : ENABLED Consume(pkt)
-    /\ \A pkt \in BagToSet(frwd) : ENABLED FrwdRply(pkt)
-    /\ \A pkt \in BagToSet(local) : ENABLED Rply(pkt)
-    /\ \A pkt \in BagToSet(nonlocal) : ENABLED Relay(pkt)
+(* packets in buf can always be processed *)
+AllPktsEnabled ==
+    buf[P] # EmptyBag => \A pkt \in BagToSet(buf[P]) : ENABLED Process(pkt)
 
 Fairness ==
     /\ \A n \in N : WF_vars(Rcv(n))
-    /\ \E pkt \in BagToSet(maxusable) : WF_vars(Consume(pkt))
-    /\ \E pkt \in BagToSet(frwd) : WF_vars(FrwdRply(pkt))
-    /\ \E pkt \in BagToSet(local) : WF_vars(Rply(pkt))
-    /\ \E pkt \in BagToSet(nonlocal) : WF_vars(Relay(pkt))
+    /\ \A rqst \in Request : WF_vars(CreateRqst(rqst))
+    /\ \A pkt \in BagToSet(buf[P]) :
+       /\ WF_vars(Consume(pkt))
+       /\ WF_vars(FrwdRply(pkt))
+       /\ WF_vars(Rply(pkt))
+       /\ WF_vars(Relay(pkt))
+       /\ WF_vars(Drop(pkt))
 
 Spec == Init /\ [][Next]_vars /\ Fairness
 =======================================================
