@@ -76,7 +76,9 @@ TotalTrust == Max(SumTrust(N \ {P}),1)
 RqstInBuf(pkt) == pkt \in [lasthop : Peers, val : Value, res : Resource]
 RplyInBuf(pkt) == pkt \in [lasthop : Peers, res : Resource]
 Add(B,elt) == B (+) SetToBag({elt})
+ADD(B,elt) == [B EXCEPT ![P] = @ (+) SetToBag({elt})]
 Rm(B,elt) == B (-) SetToBag({elt})
+RM(B,elt) == [B EXCEPT ![P] = @ (-) SetToBag({elt})]
 
 RECURSIVE Filter(_,_)
 Filter(F(_),bag) ==
@@ -97,28 +99,6 @@ toself == Filter(ToSelf,track[P])
 PNeeds == BagOfAll(Res,toself)
 rqsts_in_buf == Filter(RqstInBuf,buf[P])
 rplys_in_buf == Filter(RplyInBuf,buf[P])
-local == Filter(IsLocal,rqsts_in_buf)
-nonlocal == rqsts_in_buf (-) local
-
-(* maximal number of packets P can use locally *)
-maxusable == CHOOSE maxusable \in SubBag(rplys_in_buf) :
-    /\ BagOfAll(Res,maxusable) \sqsubseteq PNeeds
-    /\ \A usable \in SubBag(rplys_in_buf) :
-       BagOfAll(Res,usable) \sqsubseteq PNeeds
-       => BagCardinality(usable) <= BagCardinality(maxusable)
-
-(* packets P doesn't need *)
-unneeded == rplys_in_buf (-) maxusable
-
-(* packets from the unneeded that can be forwarded *)
-frwd == CHOOSE frwd \in SubBag(unneeded) :
-    /\ BagOfAll(Res,frwd) \sqsubseteq BagOfAll(Res,track[P] (-) toself)
-    /\ \A frwdable \in SubBag(unneeded) :
-       BagOfAll(Res,frwdable) \sqsubseteq BagOfAll(Res,track[P] (-) toself)
-       => BagCardinality(frwdable) <= BagCardinality(frwd)
-
-(* no matching entry *)
-discard == unneeded (-) frwd
 
 TypeInv ==
     /\ \A p \in Peers : P # p => trust[P,p] \in 0..TrustBound
@@ -127,11 +107,6 @@ TypeInv ==
     /\ IsABag(buf[P])
     /\ \A e \in BagToSet(buf[P]) : e \in [lasthop : Peers, val : Value, res : Resource]
                                  \cup [lasthop : Peers, res : Resource]
-    /\ maxusable
-       (+) frwd
-       (+) local
-       (+) nonlocal
-       (+) discard = buf[P]
     /\ BagToSet(rplys_in_buf) \subseteq [res : Resource, lasthop : Peers]
     /\ BagToSet(rqsts_in_buf) \subseteq [res : Resource, lasthop : Peers, val : Value]
     (* NOTE unneeded not always empty *)
@@ -142,7 +117,6 @@ TypeInv ==
     (* /\ local = EmptyBag *)
     (* NOTE nonlocal not always empty *)
     (* /\ nonlocal = EmptyBag *)
-    (* /\ BagCardinality(PNeeds) = BagCardinality(track[P]) *)
 
 --------------------------------------------------------------------------------
 
@@ -160,7 +134,7 @@ Rcv(n) ==
     \/ /\ n = P
        /\ chan[P,P] # << >>
        /\ BagCardinality(buf[P]) < BufBound
-       /\ buf' = [buf EXCEPT ![P] = Add(@,[lasthop |-> pkt.src, val |-> pkt.pr, res |-> pkt.res])]
+       /\ buf' = ADD(buf,[lasthop |-> pkt.src, val |-> pkt.pr, res |-> pkt.res])
        /\ chan' = [chan EXCEPT ![P,P] = Tail(@)]
        /\ UNCHANGED <<track, trust>>
     \/ /\ chan[P,P] = << >>
@@ -169,23 +143,23 @@ Rcv(n) ==
              /\ pkt.src = n
              /\ \/ /\ BagCardinality(buf[P]) >= LoadBound
                    /\ BagCardinality(RqstsFrom) < (BufBound(* .rqst *) * trust[P,n]) \div TotalTrust
-                   /\ buf' = [buf EXCEPT ![P] = Add(@,[lasthop |-> n,
-                                                       val |-> Min(trust[P,n],pkt.pr),
-                                                       res |-> pkt.res])]
+                   /\ buf' = ADD(buf,[lasthop |-> n,
+                                      val |-> Min(trust[P,n],pkt.pr),
+                                      res |-> pkt.res])
                    /\ chan' = [chan EXCEPT ![n,P] = Tail(@)]
                 \/ /\ BagCardinality(buf[P]) >= LoadBound
                    /\ BagCardinality(RqstsFrom) >= (BufBound(* .rqst *) * trust[P,n]) \div TotalTrust
                    /\ UNCHANGED <<buf, chan>>
                 \/ /\ BagCardinality(buf[P]) < LoadBound
-                   /\ buf' = [buf EXCEPT ![P] = Add(@,[lasthop |-> n,
-                                                       val |-> pkt.pr,
-                                                       res |-> pkt.res])]
+                   /\ buf' = ADD(buf,[lasthop |-> n,
+                                      val |-> pkt.pr,
+                                      res |-> pkt.res])
                    /\ chan' = [chan EXCEPT ![n,P] = Tail(@)]
              /\ UNCHANGED <<track, trust>>
           \/ /\ pkt \in Reply
              /\ \/ /\ BagCardinality(RqstsFrom) < Max((BufBound(* .rply *) * trust[P,n]) \div TotalTrust,1)
-                   /\ buf' = [buf EXCEPT ![P] = Add(@,[lasthop |-> n,
-                                                       res |-> pkt.res])]
+                   /\ buf' = ADD(buf,[lasthop |-> n,
+                                      res |-> pkt.res])
                    /\ chan' = [chan EXCEPT ![n,P] = Tail(@)]
                 \/ /\ BagCardinality(RqstsFrom) >= Max((BufBound(* .rply *) * trust[P,n]) \div TotalTrust,1)
                    /\ UNCHANGED <<buf, chan>>
@@ -201,21 +175,21 @@ Rcv(n) ==
    sends replies to all elements in sub *)
 Rply(rqst_in_buf) ==
     /\ chan' = [chan EXCEPT ![P,rqst_in_buf.lasthop] = Append(@,[res |-> rqst_in_buf.res])]
-    /\ buf' = [buf EXCEPT ![P] = Rm(@,rqst_in_buf)]
+    /\ buf' = RM(buf,rqst_in_buf)
     /\ UNCHANGED <<track, trust>>
 
 Relay(rqst_in_buf) ==
     /\ \E n \in N \ {P} :
-        /\ track' = [track EXCEPT ![P] = Add(@,[nxthop |-> rqst_in_buf.lasthop,
-                                                lasthop |-> n,
-                                                val |-> rqst_in_buf.val,
-                                                res |-> rqst_in_buf.res])]
+        /\ track' = ADD(track,[nxthop |-> rqst_in_buf.lasthop,
+                               lasthop |-> n,
+                               val |-> rqst_in_buf.val,
+                               res |-> rqst_in_buf.res])
         /\ chan' = [chan EXCEPT ![P,n] = Append(@,[src |-> P,
                                                    pr |-> IF rqst_in_buf.lasthop = P
                                                           THEN rqst_in_buf.val
                                                           ELSE 0,
                                                    res |-> rqst_in_buf.res])]
-    /\ buf' = [buf EXCEPT ![P] = Rm(@,rqst_in_buf)]
+    /\ buf' = RM(buf,rqst_in_buf)
     /\ trust' = [trust EXCEPT ![P,rqst_in_buf.lasthop] = Max(0,@ - rqst_in_buf.val)]
 
 FrwdRply(rply_in_buf) ==
@@ -227,7 +201,7 @@ FrwdRply(rply_in_buf) ==
            /\ entry.lasthop = rply_in_buf.lasthop
            /\ entry.res = rply_in_buf.res
            /\ trust' = [trust EXCEPT ![P,rply_in_buf.lasthop] = Min(TrustBound,@ + c + entry.val)]
-           /\ track' = [track EXCEPT ![P] = Rm(@,entry)]
+           /\ track' = RM(track,entry)
            /\ chan' = [chan EXCEPT ![P,entry.nxthop] = Append(@,[res |-> rply_in_buf.res])]
        /\ buf' = [buf EXCEPT ![P] = Rm(@,rply_in_buf)]
     \/ /\ ~ \E exact \in BagToSet(track[P]) :
@@ -236,9 +210,9 @@ FrwdRply(rply_in_buf) ==
        /\ \E entry \in BagToSet(track[P]) :
            /\ entry.res = rply_in_buf.res
            /\ trust' = [trust EXCEPT ![P,rply_in_buf.lasthop] = Min(TrustBound,@ + c + entry.val)]
-           /\ track' = [track EXCEPT ![P] = Rm(@,entry)]
+           /\ track' = RM(track,entry)
            /\ chan' = [chan EXCEPT ![P,entry.nxthop] = Append(@,[res |-> rply_in_buf.res])]
-       /\ buf' = [buf EXCEPT ![P] = Rm(@,rply_in_buf)]
+       /\ buf' = RM(buf,rply_in_buf)
 
 CreateRqst(rqst) ==
     (* valid requests created by P must be for resources not locally available
@@ -264,20 +238,19 @@ Consume(rply_in_buf) ==
     IN
     /\ IF knownlast = EmptyBag
        THEN \E entry \in Matches : /\ entry.nxthop = P
-                                   /\ track' = [track EXCEPT ![P] = Rm(@,entry)]
+                                   /\ track' = RM(track,entry)
                                    /\ trust' = [trust EXCEPT ![P,rply_in_buf.lasthop] = Min(@ + c + entry.val,TrustBound)]
        ELSE IF knownlast_to_P # EmptyBag
             THEN \E entry \in Knownlast_To_P :
-                  /\ track' = [track EXCEPT ![P] = Rm(@,entry)]
+                  /\ track' = RM(track,entry)
                   /\ trust' = [trust EXCEPT ![P,rply_in_buf.lasthop] = Min(@ + c + entry.val,TrustBound)]
             ELSE \E steal \in Knownlast :
                  \E own \in Matches :
                   /\ own.nxthop = P
-                  /\ track' = [track EXCEPT ![P] = Add(Rm(Rm(@,steal),own),[steal EXCEPT !.lasthop = own.lasthop, !.val = own.val])]
+                  /\ track' = ADD(RM(RM(track,steal),own),[steal EXCEPT !.lasthop = own.lasthop, !.val = own.val])
                   /\ trust' = [trust EXCEPT ![P,rply_in_buf.lasthop] = Min(@ + c + steal.val,TrustBound)]
-    /\ buf' = [buf EXCEPT ![P] = Rm(@,rply_in_buf)]
+    /\ buf' = RM(buf,rply_in_buf)
     /\ UNCHANGED chan
-
 
 Drop(rply_in_buf) ==
     /\ buf' = [buf EXCEPT ![P] = Rm(@,rply_in_buf)]
@@ -297,17 +270,16 @@ Process(pkt) ==
          ELSE Drop(pkt)
 
 Next ==
-   LET e == CHOOSE elt \in Peers \X Peers : elt[1] # elt[2]
-   IN
    (* for printing debug statements *)
    (* /\ Print(PNeeds(\* [e[1](\\* ,e[2] *\\)] *\),TRUE) *)
+   (* /\ \A steal \in BagToSet(track[P]) : *)
+   (*    \A own \in BagToSet(track[P]) : *)
+   (*     ADD(RM(RM(track,steal),own),[steal EXCEPT !.lasthop = own.lasthop, !.val = own.val]) = [track EXCEPT ![P] = Add(Rm(Rm(@,steal),own),[steal EXCEPT !.lasthop = own.lasthop, !.val = own.val])] *)
    /\ \/ FALSE
       \/ \E rqst \in Request : CreateRqst(rqst)
       \/ \E n \in N : Rcv(n)
-      (* a subset of the packets will be blocked due to IO constraints or TrackBound,
-         the complement of which are the free packets *)
-         \/ \E pkt \in BagToSet(buf[P]) :
-             Process(pkt)
+      \/ \E pkt \in BagToSet(buf[P]) :
+                   Process(pkt)
 
 (* packets in buf can always be processed *)
 AllPktsEnabled ==
