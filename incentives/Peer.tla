@@ -22,6 +22,7 @@ Peers == Honest \cup Byzantine
 Neighbour(p1,p2) == TRUE
 (* Local == [e \in Peers |-> {0}] *)
 Local == (0 :> {0} @@ 1 :> {1} @@ 2 :> {2})
+Track == BagToSet(track[P])
 AXIOM Local[P] \subseteq Resource
 AXIOM P \in Honest
 AXIOM Honest \cap Byzantine = {}
@@ -170,8 +171,6 @@ Rcv(n) ==
              /\ chan' = [chan EXCEPT ![n,P] = Tail(@)]
              /\ UNCHANGED <<buf, track, trust>>
 
-(* assumes all elements of the bag sub can be found locally,
-   sends replies to all elements in sub *)
 Rply(rqst_in_buf) ==
     /\ chan' = [chan EXCEPT ![P,rqst_in_buf.lasthop] = Append(@,[res |-> rqst_in_buf.res])]
     /\ buf' = Rm(buf,rqst_in_buf)
@@ -193,25 +192,14 @@ Relay(rqst_in_buf) ==
 
 FrwdRply(rply_in_buf) ==
     LET
-    Match(entry) == entry.res = rply_in_buf.res
-    match == Filter(Match,track[P])
+    entry == CHOOSE e \in Track :
+              /\ t.res = pkt.res
+              /\ t.lasthop = pkt.lasthop
     IN
-    \/ /\ \E entry \in BagToSet(track[P]) :
-           /\ entry.lasthop = rply_in_buf.lasthop
-           /\ entry.res = rply_in_buf.res
-           /\ trust' = Credit(rply_in_buf,entry.val)
-           /\ track' = Rm(track,entry)
-           /\ chan' = [chan EXCEPT ![P,entry.nxthop] = Append(@,[res |-> rply_in_buf.res])]
-       /\ buf' = Rm(buf,rply_in_buf)
-    \/ /\ ~ \E exact \in BagToSet(track[P]) :
-           /\ exact.lasthop = rply_in_buf.lasthop
-           /\ exact.res = rply_in_buf.res
-       /\ \E entry \in BagToSet(track[P]) :
-           /\ entry.res = rply_in_buf.res
-           /\ trust' = Credit(rply_in_buf,entry.val)
-           /\ track' = Rm(track,entry)
-           /\ chan' = [chan EXCEPT ![P,entry.nxthop] = Append(@,[res |-> rply_in_buf.res])]
-       /\ buf' = Rm(buf,rply_in_buf)
+    /\ trust' = Credit(rply_in_buf,entry.val)
+    /\ track' = Rm(track,entry)
+    /\ chan' = [chan EXCEPT ![P,entry.nxthop] = Append(@,[res |-> rply_in_buf.res])]
+    /\ buf' = Rm(buf,rply_in_buf)
 
 CreateRqst(rqst) ==
     (* valid requests created by P must be for resources not locally available
@@ -223,30 +211,13 @@ CreateRqst(rqst) ==
 
 Consume(rply_in_buf) ==
     LET
-    Track == BagToSet(track[P])
-    (* all the tracked packets that match the resource *)
-    matches == Filter(LAMBDA e : e.res = rply_in_buf.res,track[P])
-    Matches == BagToSet(matches)
-    (* all the tracked packets that match the resource and are expected to come
-       from the peer that sent the reply *)
-    knownlast == Filter(LAMBDA e : e.lasthop = rply_in_buf.lasthop,matches)
-    Knownlast == BagToSet(knownlast)
-    knownlast_to_P == Filter(LAMBDA e : e.nxthop = P,knownlast)
-    Knownlast_To_P == BagToSet(knownlast_to_P)
+    entry == CHOOSE e \in Track :
+              /\ t.res = pkt.res
+              /\ t.lasthop = pkt.lasthop
+              /\ t.nxthop = P
     IN
-    /\ IF knownlast = EmptyBag
-       THEN \E entry \in Matches : /\ entry.nxthop = P
-                                   /\ track' = Rm(track,entry)
-                                   /\ trust' = Credit(rply_in_buf,entry.val)
-       ELSE IF knownlast_to_P # EmptyBag
-            THEN \E entry \in Knownlast_To_P :
-                  /\ track' = Rm(track,entry)
-                  /\ trust' = Credit(rply_in_buf,entry.val)
-            ELSE \E steal \in Knownlast :
-                 \E own \in Matches :
-                  /\ own.nxthop = P
-                  /\ track' = Add(Rm(Rm(track,steal),own),[steal EXCEPT !.lasthop = own.lasthop, !.val = own.val])
-                  /\ trust' = Credit(rply_in_buf,steal.val)
+    /\ track' = Rm(track,entry)
+    /\ trust' = Credit(rply_in_buf,entry.val)
     /\ buf' = Rm(buf,rply_in_buf)
     /\ UNCHANGED chan
 
@@ -255,7 +226,7 @@ Drop(rply_in_buf) ==
     /\ UNCHANGED <<chan, track, trust>>
 
 Timeout ==
-    /\ \E tracked \in BagToSet(track[P]) :
+    /\ \E tracked \in Track :
         track' = Rm(track,tracked)
     /\ UNCHANGED <<buf, chan, trust>>
 
@@ -265,11 +236,16 @@ Process(pkt) ==
          THEN Rply(pkt)
          ELSE Relay(pkt)
     ELSE IF pkt \in [lasthop : N, res : Resource]
-         THEN IF BagIn(pkt.res,PNeeds)
-              THEN Consume(pkt)
-              ELSE IF ~ BagIn(pkt.res,BagOfAll(Res,track[P]))
-                   THEN Drop(pkt)
+         THEN IF \E t \in Track :
+                  /\ t.res = pkt.res
+                  /\ t.lasthop = pkt.lashop
+              THEN IF \E t \in Track :
+                       /\ t.res = pkt.res
+                       /\ t.lasthop = pkt.lashop
+                       /\ t.nxthop = P
+                   THEN Consume(pkt)
                    ELSE FrwdRply(pkt)
+              ELSE Drop(pkt)
          ELSE Drop(pkt)
 
 Next ==
